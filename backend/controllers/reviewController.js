@@ -1,58 +1,217 @@
 const Review = require('../models/Review');
 const axios = require('axios');
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
-exports.createReview = async(req,res)=>{
-    try{
-        const {title, url, code, language, userId } = req.body;
-        let finalCode = code;
+// --- HELPER FUNCTIONS ---
 
-        // github import
+function detectLanguage(url, providedLanguage) {
+    // If it's a manual paste with no URL, fallback to provided or default
+    if (!url) return (providedLanguage || 'javascript').toLowerCase();
 
-        if(url && url.includes("github.com")){
-            const rawUrl = url
-                .replace("github.com", "raw.githubusercontent.com")
-                .replace("/blob/",'/');
-            const response = await axios.get(rawUrl);
-            finalCode = response.data;
+    const ext = url.split('.').pop().toLowerCase();
+    const map = {
+        'js': 'javascript',
+        'jsx': 'javascript',
+        'ts': 'typescript',
+        'tsx': 'typescript',
+        'py': 'python',
+        'ipynb': 'python',
+        'cpp': 'cpp',
+        'c': 'c',
+        'java': 'java',
+        'html': 'html',
+        'css': 'css',
+        'rb': 'ruby',
+        'go': 'go'
+    };
+    
+    return map[ext] || (providedLanguage || 'javascript').toLowerCase();
+}
+
+function normalizeCodeText(value) {
+    if (typeof value === 'string') return value;
+    if (value && typeof value === 'object') return JSON.stringify(value, null, 2);
+    return '';
+}
+
+function safeJsonParse(rawText) {
+    try {
+        return JSON.parse(rawText);
+    } catch (error) {
+        return null;
+    }
+}
+
+function toReviewResponse(reviewDoc) {
+    return {
+        _id: reviewDoc._id,
+        title: reviewDoc.title,
+        code: reviewDoc.code,
+        language: reviewDoc.language,
+        githubUrl: reviewDoc.githubUrl,
+        userId: reviewDoc.userId,
+        status: reviewDoc.status,
+        aiSuggestions: reviewDoc.aiSuggestions,
+        createdAt: reviewDoc.createdAt
+    };
+}
+
+function toRawGithubUrl(url) {
+    if (!url) return '';
+    if (url.includes('raw.githubusercontent.com')) return url;
+    if (!url.includes('github.com')) return '';
+
+    return url
+        .replace('github.com', 'raw.githubusercontent.com')
+        .replace('/blob/', '/');
+}
+
+// --- AI LOGIC ---
+
+async function generateGroqReview(language, code) {
+    const groqKey = process.env.GROQ_API_KEY;
+    if (!groqKey) {
+        return {
+            summary: 'AI temporarily unavailable.',
+            criticalBugs: [],
+            optimizations: ['Set GROQ_API_KEY in backend/.env'],
+            score: 0,
+            correctedCode: code
+        };
+    }
+
+    // Increased context window slightly for better analysis
+    const inputCode = code.length > 5000 ? `${code.slice(0, 5000)}\n/* truncated for token control */` : code;
+    
+    const prompt = `Return only JSON with keys summary,criticalBugs,optimizations,score,correctedCode.\nRules: summary max 20 words; max 3 bugs; max 3 optimizations; score 0-10 integer; correctedCode must be improved runnable code.\nLanguage: ${language}\nCode:\n${inputCode}`;
+
+    try {
+        const response = await axios.post(
+            GROQ_URL,
+            {
+                model: 'llama-3.1-8b-instant',
+                temperature: 0.2,
+                max_tokens: 1000, // Increased for correctedCode buffer
+                response_format: { type: 'json_object' },
+                messages: [
+                    { role: 'system', content: 'You are a senior software engineer providing structured JSON reviews.' },
+                    { role: 'user', content: prompt }
+                ]
+            },
+            {
+                headers: {
+                    Authorization: `Bearer ${groqKey}`,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 25000
+            }
+        );
+
+        const raw = response.data?.choices?.[0]?.message?.content || '{}';
+        const parsed = safeJsonParse(raw) || {};
+
+        return {
+            summary: String(parsed.summary || 'No summary provided.'),
+            criticalBugs: Array.isArray(parsed.criticalBugs) ? parsed.criticalBugs : [],
+            optimizations: Array.isArray(parsed.optimizations) ? parsed.optimizations : [],
+            score: Number.isFinite(Number(parsed.score)) ? Math.max(0, Math.min(10, Number(parsed.score))) : 0,
+            correctedCode: typeof parsed.correctedCode === 'string' && parsed.correctedCode.trim() ? parsed.correctedCode : code
+        };
+    } catch (error) {
+        return {
+            summary: 'AI Analysis failed.',
+            criticalBugs: [],
+            optimizations: ['Check API quota or connection.'],
+            score: 0,
+            correctedCode: code
+        };
+    }
+}
+
+// --- EXPORTS ---
+
+exports.createReview = async (req, res) => {
+    try {
+        let title, url, code, language, userId;
+
+        // 1. Check if the input is Raw Text or JSON
+        if (typeof req.body === 'string') {
+            // Option A: RAW TEXT (Pasted Code)
+            code = req.body;
+            // Get userId from Custom Header
+            userId = req.headers['x-user-id'] || "guest_user"; 
+            title = `Manual Paste - ${new Date().toLocaleTimeString()}`;
+            language = "javascript"; // Default for text pastes
+        } else {
+            // Option B: JSON (GitHub or Structured Request)
+            ({ title, url, code, language, userId } = req.body);
+            
+            // If userId is missing in JSON body, try header as backup
+            if (!userId) {
+                userId = req.headers['x-user-id'] || "guest_user";
+            }
         }
+
+        // 2. Validation & Defaults
+        if (!userId) userId = "guest_user";
+        if (!title) title = "Untitled Review";
+
+        let finalCode = normalizeCodeText(code);
+
+        // 3. GitHub Logic (Triggered if 'url' exists in JSON body)
+        if (url) {
+            const rawUrl = toRawGithubUrl(url);
+            if (rawUrl) {
+                const response = await axios.get(rawUrl, { timeout: 15000 });
+                finalCode = normalizeCodeText(response.data);
+            }
+        }
+
+        if (!finalCode || finalCode.trim() === '') {
+            return res.status(400).json({ message: 'No code content detected' });
+        }
+
+        // 4. Intelligence & AI Review
+        const effectiveLanguage = detectLanguage(url, language);
+        const aiSuggestionsObj = await generateGroqReview(effectiveLanguage, finalCode);
+
+        // 5. Save to MongoDB
         const newReview = new Review({
             title,
             code: finalCode,
-            githubUrl: url||"",
-            language: language||"javascript",
-            userId
+            githubUrl: url || 'Manual Paste',
+            language: effectiveLanguage,
+            userId, // This is now correctly mapped from either Body or Header
+            aiSuggestions: aiSuggestionsObj
         });
+
         await newReview.save();
-        res.status(201).json({ message: "Review created successfully", review: newReview });
-    }
-    catch(err){
-        console.error("Error creating review:", err);
-        res.status(500).json({ message: "Server error" });
+        return res.status(201).json({ 
+            message: 'Review created successfully', 
+            review: toReviewResponse(newReview) 
+        });
+
+    } catch (err) {
+        console.error('DEBUG ERROR:', err);
+        return res.status(500).json({ message: 'Server error', error: err.message });
     }
 };
 
-exports.getReviews = async(req,res)=>{
-    try{
+exports.getReviews = async (req, res) => {
+    try {
         const review = await Review.findById(req.params.id);
-        if(!review){
-            return res.status(404).json({ message: "Review not found" });
-        }
-        res.json(review);
-
-    }
-    catch(err){
-        console.error("Error fetching review:", err);
-        res.status(500).json({ message: "Server error" });
+        if (!review) return res.status(404).json({ message: 'Review not found' });
+        return res.json(toReviewResponse(review));
+    } catch (err) {
+        return res.status(500).json({ message: 'Server error' });
     }
 };
 
-exports.getAllReviews = async(req,res)=>{
-    try{
+exports.getAllReviews = async (req, res) => {
+    try {
         const reviews = await Review.find({ userId: req.params.userId }).sort({ createdAt: -1 });
-        res.json(reviews);
+        return res.json(reviews.map(toReviewResponse));
+    } catch (err) {
+        return res.status(500).json({ message: 'Server error' });
     }
-    catch(err){
-        console.error("Error fetching reviews:", err);
-        res.status(500).json({ message: "Server error" });
-    }
-}
+};

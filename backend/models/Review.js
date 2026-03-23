@@ -5,9 +5,11 @@ const reviewSchema = new mongoose.Schema({
   code: { type: String, required: true },
   language: { type: String, default: "javascript" },
   githubUrl: { type: String },
-  userId: { type: String, required: true }, // For our Guest Mode ID
+  userId: { type: String, required: true },
   status: { type: String, enum: ["pending", "reviewed"], default: "pending" },
-  aiSuggestions: { type: String }, // Stores the Gemini output
+  
+  aiSuggestions: { type: Object }, 
+  
   createdAt: { type: Date, default: Date.now }
 });
 
