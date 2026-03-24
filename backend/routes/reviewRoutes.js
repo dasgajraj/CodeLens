@@ -3,16 +3,20 @@ const router = express.Router();
 const { 
     createReview, 
     getReviews, 
-    getAllReviews 
+    getAllReviews,
+    deleteReview
 } = require("../controllers/reviewController");
 
 // POST: Create a new review (Paste or GitHub)
 router.post("/", createReview);
 
+// GET: Fetch all reviews for the authenticated user (header)
+router.get("/user", getAllReviews);
+
 // GET: Fetch a single review by its ID
 router.get("/:id", getReviews);
 
-// GET: Fetch all reviews for a specific user
-router.get("/user/:userId", getAllReviews);
+// DELETE: Remove a review by its ID
+router.delete("/:id", deleteReview);
 
 module.exports = router;

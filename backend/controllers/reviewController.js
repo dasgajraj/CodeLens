@@ -4,9 +4,9 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 // --- HELPER FUNCTIONS ---
 
-function detectLanguage(url, providedLanguage) {
-    // If it's a manual paste with no URL, fallback to provided or default
-    if (!url) return (providedLanguage || 'javascript').toLowerCase();
+function detectLanguage(url, providedLanguage, headerLanguage) {
+    // If it's a manual paste with no URL, fallback to header or provided default
+    if (!url) return (headerLanguage || providedLanguage || 'javascript').toLowerCase();
 
     const ext = url.split('.').pop().toLowerCase();
     const map = {
@@ -25,7 +25,7 @@ function detectLanguage(url, providedLanguage) {
         'go': 'go'
     };
     
-    return map[ext] || (providedLanguage || 'javascript').toLowerCase();
+    return (headerLanguage || map[ext] || providedLanguage || 'javascript').toLowerCase();
 }
 
 function normalizeCodeText(value) {
@@ -40,6 +40,12 @@ function safeJsonParse(rawText) {
     } catch (error) {
         return null;
     }
+}
+
+function extractHeaderUserId(req) {
+    if (!req || !req.headers) return '';
+    const headerValue = req.headers['x-user-id'];
+    return headerValue ? String(headerValue).trim() : '';
 }
 
 function toReviewResponse(reviewDoc) {
@@ -132,28 +138,36 @@ async function generateGroqReview(language, code) {
 
 exports.createReview = async (req, res) => {
     try {
-        let title, url, code, language, userId;
+        let title, url, code, language, userId, bodyUserId;
+        const headerLanguage = req.headers['x-language'] ? String(req.headers['x-language']).toLowerCase() : '';
+        const headerUserId = extractHeaderUserId(req);
+
+        if (!headerUserId) {
+            return res.status(401).json({ message: 'Missing x-user-id header' });
+        }
 
         // 1. Check if the input is Raw Text or JSON
         if (typeof req.body === 'string') {
             // Option A: RAW TEXT (Pasted Code)
             code = req.body;
             // Get userId from Custom Header
-            userId = req.headers['x-user-id'] || "guest_user"; 
+            userId = headerUserId; 
             title = `Manual Paste - ${new Date().toLocaleTimeString()}`;
-            language = "javascript"; // Default for text pastes
+            language = headerLanguage || "javascript"; // Default for text pastes unless header provided
         } else {
             // Option B: JSON (GitHub or Structured Request)
-            ({ title, url, code, language, userId } = req.body);
+            ({ title, url, code, language, userId: bodyUserId } = req.body);
+            if (bodyUserId && bodyUserId !== headerUserId) {
+                return res.status(403).json({ message: 'userId in body does not match x-user-id header' });
+            }
+            userId = headerUserId;
             
-            // If userId is missing in JSON body, try header as backup
-            if (!userId) {
-                userId = req.headers['x-user-id'] || "guest_user";
+            if (!language && headerLanguage) {
+                language = headerLanguage;
             }
         }
 
         // 2. Validation & Defaults
-        if (!userId) userId = "guest_user";
         if (!title) title = "Untitled Review";
 
         let finalCode = normalizeCodeText(code);
@@ -172,7 +186,7 @@ exports.createReview = async (req, res) => {
         }
 
         // 4. Intelligence & AI Review
-        const effectiveLanguage = detectLanguage(url, language);
+        const effectiveLanguage = detectLanguage(url, language, headerLanguage);
         const aiSuggestionsObj = await generateGroqReview(effectiveLanguage, finalCode);
 
         // 5. Save to MongoDB
@@ -199,7 +213,12 @@ exports.createReview = async (req, res) => {
 
 exports.getReviews = async (req, res) => {
     try {
-        const review = await Review.findById(req.params.id);
+        const headerUserId = extractHeaderUserId(req);
+        if (!headerUserId) {
+            return res.status(401).json({ message: 'Missing x-user-id header' });
+        }
+
+        const review = await Review.findOne({ _id: req.params.id, userId: headerUserId });
         if (!review) return res.status(404).json({ message: 'Review not found' });
         return res.json(toReviewResponse(review));
     } catch (err) {
@@ -209,9 +228,28 @@ exports.getReviews = async (req, res) => {
 
 exports.getAllReviews = async (req, res) => {
     try {
-        const reviews = await Review.find({ userId: req.params.userId }).sort({ createdAt: -1 });
+        const headerUserId = extractHeaderUserId(req);
+        if (!headerUserId) {
+            return res.status(401).json({ message: 'Missing x-user-id header' });
+        }
+
+        const reviews = await Review.find({ userId: headerUserId }).sort({ createdAt: -1 });
         return res.json(reviews.map(toReviewResponse));
     } catch (err) {
         return res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.deleteReview = async (req, res) => {
+    try {
+        const headerUserId = extractHeaderUserId(req);
+        if (!headerUserId) {
+            return res.status(401).json({ message: 'Missing x-user-id header' });
+        }
+
+        const review = await Review.findOneAndDelete({ _id: req.params.id, userId: headerUserId });
+        if (!review) return res.status(404).json({ message: "Review not found" });
+        res.json({ message: "Review deleted successfully" });
+    } catch (err) {
+        res.status(500).json({ message: "Server error", error: err.message });
     }
 };
