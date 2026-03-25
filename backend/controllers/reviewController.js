@@ -72,6 +72,24 @@ function toRawGithubUrl(url) {
         .replace('/blob/', '/');
 }
 
+function buildContextSnippet(code) {
+    const MAX_CONTEXT = 6000;
+    if (!code || typeof code !== 'string') {
+        return { snippet: '', truncated: false };
+    }
+
+    if (code.length <= MAX_CONTEXT) {
+        return { snippet: code, truncated: false };
+    }
+
+    const head = code.slice(0, 3500);
+    const tail = code.slice(-1500);
+    const removedChars = code.length - (head.length + tail.length);
+    const snippet = `${head}\n/* ... ${removedChars} chars truncated for AI token control ... */\n${tail}`;
+
+    return { snippet, truncated: true };
+}
+
 // --- AI LOGIC ---
 
 async function generateGroqReview(language, code) {
@@ -86,10 +104,12 @@ async function generateGroqReview(language, code) {
         };
     }
 
-    // Increased context window slightly for better analysis
-    const inputCode = code.length > 5000 ? `${code.slice(0, 5000)}\n/* truncated for token control */` : code;
-    
-    const prompt = `Return only JSON with keys summary,criticalBugs,optimizations,score,correctedCode.\nRules: summary max 20 words; max 3 bugs; max 3 optimizations; score 0-10 integer; correctedCode must be improved runnable code.\nLanguage: ${language}\nCode:\n${inputCode}`;
+    const { snippet: inputCode, truncated } = buildContextSnippet(code);
+    const contextNote = truncated
+        ? 'Code truncated for length; highlight any assumptions where context may be missing.'
+        : 'Full code provided.';
+
+    const prompt = `Return only JSON with keys summary,criticalBugs,optimizations,score,correctedCode.\nRules: summary max 20 words; max 3 bugs; max 3 optimizations; score 0-10 integer; correctedCode must be improved runnable code.\n${contextNote}\nLanguage: ${language}\nCode:\n${inputCode}`;
 
     try {
         const response = await axios.post(
@@ -136,7 +156,7 @@ async function generateGroqReview(language, code) {
 
 // --- EXPORTS ---
 
-exports.createReview = async (req, res) => {
+exports.createReview = async (req, res, next) => {
     try {
         let title, url, code, language, userId, bodyUserId;
         const headerLanguage = req.headers['x-language'] ? String(req.headers['x-language']).toLowerCase() : '';
@@ -207,11 +227,11 @@ exports.createReview = async (req, res) => {
 
     } catch (err) {
         console.error('DEBUG ERROR:', err);
-        return res.status(500).json({ message: 'Server error', error: err.message });
+        return next(err);
     }
 };
 
-exports.getReviews = async (req, res) => {
+exports.getReviews = async (req, res, next) => {
     try {
         const headerUserId = extractHeaderUserId(req);
         if (!headerUserId) {
@@ -222,11 +242,11 @@ exports.getReviews = async (req, res) => {
         if (!review) return res.status(404).json({ message: 'Review not found' });
         return res.json(toReviewResponse(review));
     } catch (err) {
-        return res.status(500).json({ message: 'Server error' });
+        return next(err);
     }
 };
 
-exports.getAllReviews = async (req, res) => {
+exports.getAllReviews = async (req, res, next) => {
     try {
         const headerUserId = extractHeaderUserId(req);
         if (!headerUserId) {
@@ -236,10 +256,10 @@ exports.getAllReviews = async (req, res) => {
         const reviews = await Review.find({ userId: headerUserId }).sort({ createdAt: -1 });
         return res.json(reviews.map(toReviewResponse));
     } catch (err) {
-        return res.status(500).json({ message: 'Server error' });
+        return next(err);
     }
 };
-exports.deleteReview = async (req, res) => {
+exports.deleteReview = async (req, res, next) => {
     try {
         const headerUserId = extractHeaderUserId(req);
         if (!headerUserId) {
@@ -250,6 +270,6 @@ exports.deleteReview = async (req, res) => {
         if (!review) return res.status(404).json({ message: "Review not found" });
         res.json({ message: "Review deleted successfully" });
     } catch (err) {
-        res.status(500).json({ message: "Server error", error: err.message });
+        return next(err);
     }
 };

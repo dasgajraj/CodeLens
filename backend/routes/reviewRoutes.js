@@ -6,9 +6,10 @@ const {
     getAllReviews,
     deleteReview
 } = require("../controllers/reviewController");
+const { validateCreateReview } = require("../middleware/validation");
 
 // POST: Create a new review (Paste or GitHub)
-router.post("/", createReview);
+router.post("/", validateCreateReview, createReview);
 
 // GET: Fetch all reviews for the authenticated user (header)
 router.get("/user", getAllReviews);
