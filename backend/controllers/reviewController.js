@@ -195,10 +195,12 @@ exports.createReview = async (req, res, next) => {
         // 3. GitHub Logic (Triggered if 'url' exists in JSON body)
         if (url) {
             const rawUrl = toRawGithubUrl(url);
-            if (rawUrl) {
-                const response = await axios.get(rawUrl, { timeout: 15000 });
-                finalCode = normalizeCodeText(response.data);
+            if (!rawUrl) {
+                return res.status(400).json({ message: 'Only GitHub URLs are permitted.' });
             }
+
+            const response = await axios.get(rawUrl, { timeout: 15000 });
+            finalCode = normalizeCodeText(response.data);
         }
 
         if (!finalCode || finalCode.trim() === '') {

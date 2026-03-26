@@ -9,6 +9,14 @@ const errorHandler = require("./middleware/errorHandler");
 
 const app = express();
 
+const globalLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: "Too many requests from this IP. Please try again later." }
+});
+
 const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 30,
@@ -18,6 +26,7 @@ const apiLimiter = rateLimit({
 });
 
 app.use(cors());
+app.use(globalLimiter);
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use('/api', apiLimiter);
 app.use(express.json({ limit: '5mb', strict: false }));
