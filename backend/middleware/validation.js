@@ -36,6 +36,21 @@ const createReviewSchema = Joi.object({
     userId: Joi.string().trim().max(64).optional()
 }).or('url', 'code');
 
+const signupSchema = Joi.object({
+    name: Joi.string().trim().min(2).max(80).optional(),
+    email: Joi.string().email().required(),
+    password: Joi.string().min(8).max(128).required()
+});
+
+const loginSchema = Joi.object({
+    email: Joi.string().email().required(),
+    password: Joi.string().min(8).max(128).required()
+});
+
+const refreshSchema = Joi.object({
+    refreshToken: Joi.string().required()
+});
+
 function validateCreateReview(req, res, next) {
     if (typeof req.body === 'string') {
         if (!req.body.trim()) {
@@ -60,5 +75,35 @@ function validateCreateReview(req, res, next) {
 }
 
 module.exports = {
-    validateCreateReview
+    validateCreateReview,
+    validateSignup: (req, res, next) => {
+        const { error } = signupSchema.validate(req.body || {}, { abortEarly: false, allowUnknown: false });
+        if (error) {
+            return res.status(400).json({
+                message: 'Validation failed',
+                details: error.details.map((detail) => detail.message.replace(/"/g, ''))
+            });
+        }
+        return next();
+    },
+    validateLogin: (req, res, next) => {
+        const { error } = loginSchema.validate(req.body || {}, { abortEarly: false, allowUnknown: false });
+        if (error) {
+            return res.status(400).json({
+                message: 'Validation failed',
+                details: error.details.map((detail) => detail.message.replace(/"/g, ''))
+            });
+        }
+        return next();
+    },
+    validateRefresh: (req, res, next) => {
+        const { error } = refreshSchema.validate(req.body || {}, { abortEarly: false, allowUnknown: false });
+        if (error) {
+            return res.status(400).json({
+                message: 'Validation failed',
+                details: error.details.map((detail) => detail.message.replace(/"/g, ''))
+            });
+        }
+        return next();
+    }
 };

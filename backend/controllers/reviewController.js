@@ -42,12 +42,6 @@ function safeJsonParse(rawText) {
     }
 }
 
-function extractHeaderUserId(req) {
-    if (!req || !req.headers) return '';
-    const headerValue = req.headers['x-user-id'];
-    return headerValue ? String(headerValue).trim() : '';
-}
-
 function toReviewResponse(reviewDoc) {
     return {
         _id: reviewDoc._id,
@@ -158,29 +152,26 @@ async function generateGroqReview(language, code) {
 
 exports.createReview = async (req, res, next) => {
     try {
-        let title, url, code, language, userId, bodyUserId;
+        let title, url, code, language, bodyUserId;
         const headerLanguage = req.headers['x-language'] ? String(req.headers['x-language']).toLowerCase() : '';
-        const headerUserId = extractHeaderUserId(req);
+        const authenticatedUserId = req.user && req.user.id;
 
-        if (!headerUserId) {
-            return res.status(401).json({ message: 'Missing x-user-id header' });
+        if (!authenticatedUserId) {
+            return res.status(401).json({ message: 'Missing authenticated user context' });
         }
 
         // 1. Check if the input is Raw Text or JSON
         if (typeof req.body === 'string') {
             // Option A: RAW TEXT (Pasted Code)
             code = req.body;
-            // Get userId from Custom Header
-            userId = headerUserId; 
             title = `Manual Paste - ${new Date().toLocaleTimeString()}`;
             language = headerLanguage || "javascript"; // Default for text pastes unless header provided
         } else {
             // Option B: JSON (GitHub or Structured Request)
             ({ title, url, code, language, userId: bodyUserId } = req.body);
-            if (bodyUserId && bodyUserId !== headerUserId) {
-                return res.status(403).json({ message: 'userId in body does not match x-user-id header' });
+            if (bodyUserId && bodyUserId !== authenticatedUserId) {
+                return res.status(403).json({ message: 'userId in body does not match authenticated user' });
             }
-            userId = headerUserId;
             
             if (!language && headerLanguage) {
                 language = headerLanguage;
@@ -217,7 +208,7 @@ exports.createReview = async (req, res, next) => {
             code: finalCode,
             githubUrl: url || 'Manual Paste',
             language: effectiveLanguage,
-            userId, // This is now correctly mapped from either Body or Header
+            userId: authenticatedUserId,
             aiSuggestions: aiSuggestionsObj
         });
 
@@ -235,12 +226,12 @@ exports.createReview = async (req, res, next) => {
 
 exports.getReviews = async (req, res, next) => {
     try {
-        const headerUserId = extractHeaderUserId(req);
-        if (!headerUserId) {
-            return res.status(401).json({ message: 'Missing x-user-id header' });
+        const userId = req.user && req.user.id;
+        if (!userId) {
+            return res.status(401).json({ message: 'Missing authenticated user context' });
         }
 
-        const review = await Review.findOne({ _id: req.params.id, userId: headerUserId });
+        const review = await Review.findOne({ _id: req.params.id, userId });
         if (!review) return res.status(404).json({ message: 'Review not found' });
         return res.json(toReviewResponse(review));
     } catch (err) {
@@ -250,12 +241,12 @@ exports.getReviews = async (req, res, next) => {
 
 exports.getAllReviews = async (req, res, next) => {
     try {
-        const headerUserId = extractHeaderUserId(req);
-        if (!headerUserId) {
-            return res.status(401).json({ message: 'Missing x-user-id header' });
+        const userId = req.user && req.user.id;
+        if (!userId) {
+            return res.status(401).json({ message: 'Missing authenticated user context' });
         }
 
-        const reviews = await Review.find({ userId: headerUserId }).sort({ createdAt: -1 });
+        const reviews = await Review.find({ userId }).sort({ createdAt: -1 });
         return res.json(reviews.map(toReviewResponse));
     } catch (err) {
         return next(err);
@@ -263,12 +254,12 @@ exports.getAllReviews = async (req, res, next) => {
 };
 exports.deleteReview = async (req, res, next) => {
     try {
-        const headerUserId = extractHeaderUserId(req);
-        if (!headerUserId) {
-            return res.status(401).json({ message: 'Missing x-user-id header' });
+        const userId = req.user && req.user.id;
+        if (!userId) {
+            return res.status(401).json({ message: 'Missing authenticated user context' });
         }
 
-        const review = await Review.findOneAndDelete({ _id: req.params.id, userId: headerUserId });
+        const review = await Review.findOneAndDelete({ _id: req.params.id, userId });
         if (!review) return res.status(404).json({ message: "Review not found" });
         res.json({ message: "Review deleted successfully" });
     } catch (err) {

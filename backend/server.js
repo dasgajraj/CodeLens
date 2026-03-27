@@ -5,6 +5,7 @@ const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 require("dotenv").config();
 const reviewRoutes = require("./routes/reviewRoutes");
+const authRoutes = require("./routes/authRoutes");
 const errorHandler = require("./middleware/errorHandler");
 
 const app = express();
@@ -31,6 +32,7 @@ app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use('/api', apiLimiter);
 app.use(express.json({ limit: '5mb', strict: false }));
 app.use(express.text({ type: 'text/plain', limit: '5mb' }));
+app.use("/api/auth", authRoutes);
 app.use("/api/reviews", reviewRoutes);
 
 mongoose

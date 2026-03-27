@@ -8,6 +8,9 @@ const {
 } = require("../controllers/reviewController");
 const { validateCreateReview } = require("../middleware/validation");
 const { perUserReviewLimiter } = require("../middleware/throttle");
+const { authenticate } = require("../middleware/auth");
+
+router.use(authenticate);
 
 // POST: Create a new review (Paste or GitHub)
 router.post("/", perUserReviewLimiter, validateCreateReview, createReview);

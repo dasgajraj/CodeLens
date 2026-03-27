@@ -7,11 +7,9 @@ const perUserReviewLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => {
-        const headerUser = req.headers['x-user-id'];
-        if (headerUser) {
-            return String(headerUser).trim();
+        if (req.user && req.user.id) {
+            return req.user.id;
         }
-
         return ipKeyGenerator(req);
     },
     handler: (req, res) => {
