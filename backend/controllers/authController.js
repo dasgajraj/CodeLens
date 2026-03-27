@@ -141,13 +141,18 @@ exports.logout = async (req, res, next) => {
     }
 };
 
-exports.getUsers = async (req, res, next) => {
+exports.getProfile = async (req, res, next) => {
     try {
-        const users = await User.find().sort({ createdAt: -1 });
-        return res.json({
-            count: users.length,
-            users: users.map(sanitizeUser)
-        });
+        if (!req.user || !req.user.id) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
+
+        const user = await User.findById(req.user.id).select('-password -refreshTokens');
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        return res.json({ user: sanitizeUser(user) });
     } catch (error) {
         return next(error);
     }
