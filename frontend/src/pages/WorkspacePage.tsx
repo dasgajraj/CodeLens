@@ -2,22 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import {
   Bot,
+  CalendarDays,
   Code2,
   Copy,
-  CalendarDays,
   Download,
   ExternalLink,
   FileCode2,
   GitBranch,
-  LogOut,
   RefreshCcw,
   Send,
   Sparkles,
   Trash2,
 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { signOut } from '../features/auth/authSlice'
 import {
   createGithubReview,
   createRawReview,
@@ -39,9 +36,10 @@ export function average(values: number[]) {
   return sum(values) / values.length
 }`
 
+const correctedCodePlaceholder = '// AI corrected code will appear here once generated'
+
 export function WorkspacePage() {
   const dispatch = useAppDispatch()
-  const navigate = useNavigate()
   const auth = useAppSelector((state) => state.auth)
   const reviewsState = useAppSelector((state) => state.reviews)
   const [composeMode, setComposeMode] = useState<ComposeMode>('github')
@@ -49,7 +47,10 @@ export function WorkspacePage() {
   const [url, setUrl] = useState('')
   const [language, setLanguage] = useState('typescript')
   const [code, setCode] = useState(starterSnippet)
-  const [isPayloadModalOpen, setIsPayloadModalOpen] = useState(false)
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false)
+  const [editableCorrectedCode, setEditableCorrectedCode] = useState(correctedCodePlaceholder)
+  const [showAllReviews, setShowAllReviews] = useState(false)
   const hasLoadedInitialReviews = useRef(false)
 
   const selectedReview = useMemo(
@@ -66,32 +67,31 @@ export function WorkspacePage() {
       )
     : 0
 
-  const selectedReviewPayload = selectedReview
-    ? JSON.stringify(selectedReview, null, 2)
-    : JSON.stringify(
-        {
-          _id: '',
-          title: '',
-          code: '',
-          language: '',
-          githubUrl: '',
-          userId: '',
-          status: '',
-          aiSuggestions: {
-            summary: '',
-            criticalBugs: [],
-            optimizations: [],
-            score: 0,
-            correctedCode: '',
-          },
-          createdAt: '',
-        },
-        null,
-        2,
-      )
+  const formattedTimestamp = selectedReview?.createdAt
+    ? new Date(selectedReview.createdAt).toLocaleString()
+    : 'Timestamp unavailable'
+  const criticalBugs = selectedReview?.aiSuggestions?.criticalBugs ?? []
+  const optimizations = selectedReview?.aiSuggestions?.optimizations ?? []
 
   const copyToClipboard = async (value: string) => {
-    await navigator.clipboard.writeText(value)
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(value)
+        return
+      }
+    } catch {
+      /* ignored */
+    }
+
+    const fallback = document.createElement('textarea')
+    fallback.value = value
+    fallback.style.position = 'fixed'
+    fallback.style.left = '-9999px'
+    document.body.appendChild(fallback)
+    fallback.focus()
+    fallback.select()
+    document.execCommand('copy')
+    document.body.removeChild(fallback)
   }
 
   const downloadFile = (filename: string, content: string) => {
@@ -119,31 +119,78 @@ export function WorkspacePage() {
     }
   }, [dispatch, reviewsState.selectedReviewId])
 
+  useEffect(() => {
+    if (!selectedReview) {
+      setEditableCorrectedCode(correctedCodePlaceholder)
+      return
+    }
+    setEditableCorrectedCode(selectedReview.aiSuggestions?.correctedCode || correctedCodePlaceholder)
+  }, [selectedReview])
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
-    if (composeMode === 'github') {
-      await dispatch(
-        createGithubReview({
-          title,
-          url,
-          language: language || undefined,
-        }),
-      )
-      return
-    }
+    try {
+      if (composeMode === 'github') {
+        await dispatch(
+          createGithubReview({
+            title,
+            url,
+            language: language || undefined,
+          }),
+        ).unwrap()
+      } else {
+        await dispatch(
+          createRawReview({
+            code,
+            language: language || undefined,
+          }),
+        ).unwrap()
+      }
 
-    await dispatch(
-      createRawReview({
-        code,
-        language: language || undefined,
-      }),
-    )
+      setIsCreateModalOpen(false)
+      setTitle('')
+      setUrl('')
+      setLanguage('typescript')
+      setCode(starterSnippet)
+    } catch {
+      /* errors handled in slice */
+    }
   }
 
-  const handleLogout = async () => {
-    await dispatch(signOut())
-    navigate('/auth', { replace: true })
+  const handleReviewRefresh = () => {
+    if (!selectedReview?._id) {
+      return
+    }
+    void dispatch(fetchReviewById(selectedReview._id))
+  }
+
+  const handleDeleteReview = async () => {
+    if (!selectedReview?._id) {
+      return
+    }
+    await dispatch(deleteReview(selectedReview._id))
+    setIsReviewModalOpen(false)
+  }
+
+  const handleReviewSelect = (review: Review) => {
+    dispatch(selectReview(review._id))
+    setIsReviewModalOpen(true)
+    setEditableCorrectedCode(review.aiSuggestions?.correctedCode || correctedCodePlaceholder)
+    void dispatch(fetchReviewById(review._id))
+  }
+
+  const handleCopyCorrectedCode = () => {
+    void copyToClipboard(editableCorrectedCode)
+  }
+
+  const handleDownloadCorrectedCode = () => {
+    const fileSafeTitle = (selectedReview?.title ?? 'ai-corrected')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+    const filename = `${fileSafeTitle || 'ai-corrected'}.${selectedReview?.language ?? 'txt'}`
+    downloadFile(filename, editableCorrectedCode)
   }
 
   return (
@@ -152,40 +199,22 @@ export function WorkspacePage() {
         <div className="hero-copy">
           <div className="eyebrow">
             <span className="eyebrow-dot" />
-            Review command deck
+            Workspace control room
           </div>
-          <h1>Paste code, review GitHub files, and inspect AI output in one studio.</h1>
+          <h1>Launch reviews, open modals, and keep Monaco inline.</h1>
           <p>
-            CodeLens now keeps the writing surface, review response, corrected code, and
-            saved history visible in one place so the workflow feels deliberate instead of
-            fragmented.
+            Saved reviews stay in the rail, the board highlights what to do next, and every
+            selection opens a styled detail modal instead of dumping JSON.
           </p>
-        </div>
-
-        <div className="user-hub glass-panel">
-          <div className="user-hub-top">
-            <div>
-              <p className="section-label">Session</p>
-              <h2>{auth.user?.name || auth.user?.email || 'CodeLens user'}</h2>
-            </div>
-            <div className="user-hub-actions">
-              <button className="ghost-button" type="button" onClick={() => void dispatch(fetchReviews())}>
-                <RefreshCcw size={16} />
-                Refresh reviews
-              </button>
-              <button className="primary-button" type="button" onClick={handleLogout}>
-                <LogOut size={16} />
-                Logout
-              </button>
-            </div>
-          </div>
-
-          <div className="status-strip">
-            <span className="status-pill status-pill-live">
-              {auth.user?.name || auth.user?.email || 'Guest'}
-            </span>
-            <span className="status-pill">{totalReviews} stored reviews</span>
-            <span className="status-pill">Persisted token session</span>
+          <div className="hero-actions">
+            <button className="primary-button" type="button" onClick={() => setIsCreateModalOpen(true)}>
+              New review
+              <Send size={16} />
+            </button>
+            <button className="ghost-button" type="button" onClick={() => void dispatch(fetchReviews())}>
+              <RefreshCcw size={16} />
+              Sync history
+            </button>
           </div>
         </div>
 
@@ -195,9 +224,9 @@ export function WorkspacePage() {
               <FileCode2 size={18} />
             </div>
             <div>
-              <p className="metric-label">Total reviews</p>
+              <p className="metric-label">Stored reviews</p>
               <strong>{totalReviews}</strong>
-              <span>Saved locally in Redux and refreshed from the API.</span>
+              <span>Fetched for {auth.user?.name ?? auth.user?.email ?? 'guest user'}.</span>
             </div>
           </article>
           <article className="metric-card">
@@ -205,9 +234,9 @@ export function WorkspacePage() {
               <Sparkles size={18} />
             </div>
             <div>
-              <p className="metric-label">Average AI score</p>
+              <p className="metric-label">Average score</p>
               <strong>{averageScore}/10</strong>
-              <span>Based on the reviews currently loaded in the workspace.</span>
+              <span>Derived from the AI suggestions currently in memory.</span>
             </div>
           </article>
           <article className="metric-card">
@@ -215,12 +244,9 @@ export function WorkspacePage() {
               <Bot size={18} />
             </div>
             <div>
-              <p className="metric-label">Token status</p>
-              <strong>{auth.accessToken ? 'Loaded' : 'Missing'}</strong>
-              <span>
-                Refresh token {auth.refreshToken ? 'ready' : 'missing'} if `/api/auth/me`
-                needs renewal.
-              </span>
+              <p className="metric-label">Session</p>
+              <strong>{auth.status === 'authenticated' ? 'Authenticated' : 'Guest'}</strong>
+              <span>{auth.accessToken ? 'Tokens ready for review creation.' : 'Sign in to persist more runs.'}</span>
             </div>
           </article>
         </div>
@@ -236,554 +262,302 @@ export function WorkspacePage() {
 
         <div className="history-list">
           {reviewsState.items.length === 0 ? (
-            <p className="empty-copy">No reviews yet. Create one from GitHub or Monaco paste.</p>
+            <p className="empty-copy">No reviews yet. Create one from the board.</p>
           ) : (
-            reviewsState.items.map((review: Review) => (
-              <button
-                type="button"
-                key={review._id}
-                className={`history-item ${
-                  review._id === reviewsState.selectedReviewId ? 'is-active' : ''
-                }`}
-                onClick={() => dispatch(selectReview(review._id))}
-              >
-                <div>
-                  <strong>{review.title}</strong>
-                  <span>{review._id}</span>
-                </div>
-                <span className="history-meta">{review.language}</span>
-              </button>
-            ))
+            <>
+              {(showAllReviews ? reviewsState.items : reviewsState.items.slice(0, 4)).map((review: Review) => (
+                <button
+                  type="button"
+                  key={review._id}
+                  className={`history-item ${review._id === reviewsState.selectedReviewId ? 'is-active' : ''}`}
+                  onClick={() => handleReviewSelect(review)}
+                >
+                  <div>
+                    <strong>{review.title || 'Untitled review'}</strong>
+                    <span>{review.language ?? 'Unknown language'}</span>
+                  </div>
+                  <span className="history-meta">
+                    {review.createdAt ? new Date(review.createdAt).toLocaleDateString() : 'No timestamp'}
+                  </span>
+                </button>
+              ))}
+              {reviewsState.items.length > 4 ? (
+                <button
+                  type="button"
+                  className="ghost-button full-width"
+                  onClick={() => setShowAllReviews((prev) => !prev)}
+                >
+                  {showAllReviews ? 'Show fewer memories' : `Show all ${reviewsState.items.length} reviews`}
+                </button>
+              ) : null}
+            </>
           )}
         </div>
       </section>
 
-      <section className="editor-stage surface">
-        <div className="editor-header">
-          <div>
-            <p className="section-label">Create review</p>
-            <h2>{composeMode === 'github' ? 'GitHub file request' : 'Raw paste in Monaco'}</h2>
+      <section className="editor-stage surface workspace-board">
+        <div className="workspace-board-card glass-panel">
+          <p className="section-label">Create review</p>
+          <h2>Launch the composer</h2>
+          <p>Use GitHub URLs or raw Monaco pastes without leaving the workspace.</p>
+          <div className="workspace-board-actions">
+            <button className="primary-button" type="button" onClick={() => setIsCreateModalOpen(true)}>
+              Open composer
+              <Send size={16} />
+            </button>
+            <button className="ghost-button" type="button" onClick={() => setComposeMode('github')}>
+              Default to GitHub
+            </button>
           </div>
         </div>
 
-        <div className="composer-toggle" role="tablist" aria-label="Review mode">
-          <button
-            type="button"
-            className={`mode-pill ${composeMode === 'github' ? 'is-active' : ''}`}
-            onClick={() => setComposeMode('github')}
-          >
-            <GitBranch size={14} />
-            GitHub file
-          </button>
-          <button
-            type="button"
-            className={`mode-pill ${composeMode === 'paste' ? 'is-active' : ''}`}
-            onClick={() => setComposeMode('paste')}
-          >
-            <Code2 size={14} />
-            Raw paste editor
-          </button>
-        </div>
-
-        <form className="composer-grid" onSubmit={handleSubmit}>
-          {composeMode === 'github' ? (
-            <>
-              <label className="field">
-                <span>Review title</span>
-                <input
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="Auth middleware pass"
-                  required
-                />
-              </label>
-              <label className="field field-wide">
-                <span>GitHub file URL</span>
-                <input
-                  value={url}
-                  onChange={(event) => setUrl(event.target.value)}
-                  placeholder="https://github.com/org/repo/blob/main/src/file.ts"
-                  required
-                />
-              </label>
-            </>
-          ) : (
-            <div className="field field-wide">
-              <span>Raw code payload</span>
-              <div className="editor-frame compose-editor-frame">
-                <div className="editor-toolbar">
-                  <div className="traffic-lights" aria-hidden="true">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <span className="editor-tab">raw-review-input.{language || 'ts'}</span>
-                  <span className="editor-badge">Editable Monaco editor</span>
-                </div>
-
-                <div className="editor-wrapper compose-editor-wrapper">
-                  <Editor
-                    height="100%"
-                    defaultLanguage="typescript"
-                    language={language || 'typescript'}
-                    value={code}
-                    theme="codelens-dark"
-                    beforeMount={configureMonaco}
-                    onChange={(value) => setCode(value ?? '')}
-                    options={{
-                      ...sharedEditorOptions,
-                      readOnly: false,
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          <label className="field">
-            <span>{composeMode === 'github' ? 'Language hint' : 'Editor language'}</span>
-            <input
-              value={language}
-              onChange={(event) => setLanguage(event.target.value)}
-              placeholder="typescript"
-            />
-          </label>
-
-          <button className="primary-button submit-button" type="submit">
-            {reviewsState.submitStatus === 'submitting' ? 'Submitting...' : 'Create review'}
-            <Send size={16} />
-          </button>
-        </form>
-
-        {reviewsState.error ? <p className="error-banner">{reviewsState.error}</p> : null}
-
-        <div className="response-grid">
-          <section className="response-panel">
-            <div className="response-panel-header">
-              <div>
-                <p className="section-label">API response</p>
-                <h3>{selectedReview?.title ?? 'Select or create a review'}</h3>
-              </div>
-              {selectedReview?.githubUrl.startsWith('http') ? (
-                <a
-                  className="ghost-button compact"
-                  href={selectedReview.githubUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <ExternalLink size={14} />
-                  Source
-                </a>
-              ) : null}
-            </div>
-
-            <div className="response-card-grid">
-              <article className="ai-callout">
-                <div className="callout-icon">
-                  <Bot size={18} />
-                </div>
-                <div>
-                  <strong>{selectedReview?.aiSuggestions?.summary ?? 'No AI summary yet'}</strong>
-                  <p>
-                    Score: {selectedReview?.aiSuggestions?.score ?? 0}/10. Review id:{' '}
-                    {selectedReview?._id ?? 'not selected'}.
-                  </p>
-                </div>
-              </article>
-
-              <div className="timeline">
-                {(selectedReview?.aiSuggestions?.criticalBugs ?? []).map((bug: string) => (
-                  <div className="timeline-item" key={bug}>
-                    <span className="timeline-marker" />
-                    <div>
-                      <strong>Critical bug</strong>
-                      <p>{bug}</p>
-                    </div>
-                  </div>
-                ))}
-                {(selectedReview?.aiSuggestions?.optimizations ?? []).map((optimization: string) => (
-                  <div className="timeline-item" key={optimization}>
-                    <span className="timeline-marker" />
-                    <div>
-                      <strong>Optimization</strong>
-                      <p>{optimization}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="stack-actions">
-              {selectedReview ? (
-                <>
-                  <button
-                    className="ghost-button full-width"
-                    type="button"
-                    onClick={() => void dispatch(fetchReviewById(selectedReview._id))}
-                  >
-                    <RefreshCcw size={15} />
-                    Refresh selected review
-                  </button>
-                  <button
-                    className="ghost-button full-width"
-                    type="button"
-                    onClick={() => void dispatch(deleteReview(selectedReview._id))}
-                  >
-                    <Trash2 size={15} />
-                    Delete review
-                  </button>
-                </>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="response-panel">
-            <div className="response-panel-header">
-              <div>
-                <p className="section-label">Original code</p>
-                <h3>{selectedReview?.language ?? language}</h3>
-              </div>
-              <div className="panel-actions">
-                <button
-                  className="ghost-button compact"
-                  type="button"
-                  onClick={() => copyToClipboard(selectedReview?.code ?? '')}
-                >
-                  <Copy size={14} />
-                  Copy
-                </button>
-                <button
-                  className="ghost-button compact"
-                  type="button"
-                  onClick={() =>
-                    downloadFile(
-                      `${selectedReview?.title ?? 'original-code'}.${selectedReview?.language ?? language ?? 'txt'}`,
-                      selectedReview?.code ?? '',
-                    )
-                  }
-                >
-                  <Download size={14} />
-                  Download
-                </button>
-              </div>
-            </div>
-
-            <div className="editor-frame">
-              <div className="editor-toolbar">
-                <div className="traffic-lights" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-                <span className="editor-tab">
-                  {selectedReview?.title ?? 'Waiting for selected review'}
-                </span>
-                <span className="editor-badge">Stored submission</span>
-              </div>
-
-              <div className="editor-wrapper">
-                <Editor
-                  height="100%"
-                  defaultLanguage="typescript"
-                  language={selectedReview?.language ?? language ?? 'typescript'}
-                  value={selectedReview?.code ?? '// No review selected yet'}
-                  theme="codelens-dark"
-                  beforeMount={configureMonaco}
-                  options={{
-                    ...sharedEditorOptions,
-                    readOnly: true,
-                  }}
-                />
-              </div>
-            </div>
-          </section>
-
-          <section className="response-panel response-panel-wide">
-            <div className="response-panel-header">
-              <div>
-                <p className="section-label">AI suggested code</p>
-                <h3>Corrected output</h3>
-              </div>
-              <div className="panel-actions">
-                <button
-                  className="ghost-button compact"
-                  type="button"
-                  onClick={() =>
-                    copyToClipboard(
-                      selectedReview?.aiSuggestions?.correctedCode ||
-                        '// AI corrected code will appear here after a review is generated',
-                    )
-                  }
-                >
-                  <Copy size={14} />
-                  Copy
-                </button>
-                <button
-                  className="ghost-button compact"
-                  type="button"
-                  onClick={() =>
-                    downloadFile(
-                      `ai-corrected-output.${selectedReview?.language ?? language ?? 'txt'}`,
-                      selectedReview?.aiSuggestions?.correctedCode ||
-                        '// AI corrected code will appear here after a review is generated',
-                    )
-                  }
-                >
-                  <Download size={14} />
-                  Download
-                </button>
-              </div>
-            </div>
-
-            <div className="editor-frame">
-              <div className="editor-toolbar">
-                <div className="traffic-lights" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-                <span className="editor-tab">ai-corrected-output.ts</span>
-                <span className="editor-badge">Generated correction</span>
-              </div>
-
-              <div className="editor-wrapper corrected-editor-wrapper">
-                <Editor
-                  height="100%"
-                  defaultLanguage="typescript"
-                  language={selectedReview?.language ?? language ?? 'typescript'}
-                  value={
-                    selectedReview?.aiSuggestions?.correctedCode ||
-                    '// AI corrected code will appear here after a review is generated'
-                  }
-                  theme="codelens-dark"
-                  beforeMount={configureMonaco}
-                  options={{
-                    ...sharedEditorOptions,
-                    readOnly: true,
-                  }}
-                />
-              </div>
-            </div>
-          </section>
-
-          <section className="response-panel response-panel-wide">
-            <div className="response-panel-header">
-              <div>
-                <p className="section-label">Selected review payload</p>
-                <h3>Review details</h3>
-              </div>
-              <div className="panel-actions">
-                <button
-                  className="ghost-button compact"
-                  type="button"
-                  onClick={() => downloadFile('selected-review.json', selectedReviewPayload)}
-                >
-                  <Download size={14} />
-                  Download
-                </button>
-                <button
-                  className="ghost-button compact"
-                  type="button"
-                  onClick={() => setIsPayloadModalOpen(true)}
-                >
-                  <FileCode2 size={14} />
-                  View full review
-                </button>
-              </div>
-            </div>
-
-            <div className="review-meta-grid">
-              <article className="metric-card">
-                <div className="metric-icon">
-                  <FileCode2 size={18} />
-                </div>
-                <div>
-                  <p className="metric-label">Review id</p>
-                  <strong>{selectedReview?._id ?? 'Not selected'}</strong>
-                  <span>createdAt: {selectedReview?.createdAt ?? 'Unavailable'}</span>
-                </div>
-              </article>
-              <article className="metric-card">
-                <div className="metric-icon">
-                  <GitBranch size={18} />
-                </div>
-                <div>
-                  <p className="metric-label">Source</p>
-                  <strong>{selectedReview?.githubUrl || 'Manual paste'}</strong>
-                  <span>language: {selectedReview?.language ?? 'Unknown'}</span>
-                </div>
-              </article>
-              <article className="metric-card">
-                <div className="metric-icon">
-                  <Bot size={18} />
-                </div>
-                <div>
-                  <p className="metric-label">Ownership</p>
-                  <strong>{selectedReview?.userId ?? 'Unavailable'}</strong>
-                  <span>status: {selectedReview?.status ?? 'Unknown'}</span>
-                </div>
-              </article>
-            </div>
-          </section>
+        <div className="workspace-board-card glass-panel">
+          <p className="section-label">Selected review</p>
+          <h2>{selectedReview?.title ?? 'No review selected yet'}</h2>
+          <p>
+            {selectedReview
+              ? 'Open the modal for structured AI feedback, Monaco previews, and metadata.'
+              : 'Choose a stored review from the left rail to inspect details.'}
+          </p>
+          <div className="workspace-board-actions">
+            <button
+              className="ghost-button"
+              type="button"
+              disabled={!selectedReview}
+              onClick={() => setIsReviewModalOpen(Boolean(selectedReview))}
+            >
+              View details
+            </button>
+            <button className="ghost-button" type="button" disabled={!selectedReview} onClick={handleReviewRefresh}>
+              <RefreshCcw size={16} />
+              Refresh selected
+            </button>
+          </div>
+          {selectedReview ? <span className="history-meta">Last updated: {formattedTimestamp}</span> : null}
         </div>
       </section>
 
-      {isPayloadModalOpen ? (
-        <div className="modal-backdrop" onClick={() => setIsPayloadModalOpen(false)} role="presentation">
+      {isCreateModalOpen ? (
+        <div className="modal-backdrop" onClick={() => setIsCreateModalOpen(false)} role="presentation">
           <section
-            className="modal-shell"
+            className="modal-shell create-review-modal"
             role="dialog"
             aria-modal="true"
-            aria-label="Full selected review payload"
+            aria-label="Create review"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="response-panel-header">
               <div>
-                <p className="section-label">Selected review payload</p>
-                <h3>Full stored review</h3>
+                <p className="section-label">Create review</p>
+                <h3>{composeMode === 'github' ? 'GitHub file request' : 'Raw Monaco paste'}</h3>
               </div>
-              <div className="panel-actions">
+              <button className="ghost-button compact" type="button" onClick={() => setIsCreateModalOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <div className="composer-toggle" role="tablist" aria-label="Review mode">
+              <button
+                type="button"
+                className={`mode-pill ${composeMode === 'github' ? 'is-active' : ''}`}
+                onClick={() => setComposeMode('github')}
+              >
+                <GitBranch size={14} />
+                GitHub file
+              </button>
+              <button
+                type="button"
+                className={`mode-pill ${composeMode === 'paste' ? 'is-active' : ''}`}
+                onClick={() => setComposeMode('paste')}
+              >
+                <Code2 size={14} />
+                Raw paste editor
+              </button>
+            </div>
+
+            <form className="composer-grid" onSubmit={handleSubmit}>
+              {composeMode === 'github' ? (
+                <>
+                  <label className="field">
+                    <span>Review title</span>
+                    <input
+                      value={title}
+                      onChange={(event) => setTitle(event.target.value)}
+                      placeholder="Auth middleware pass"
+                      required
+                    />
+                  </label>
+                  <label className="field field-wide">
+                    <span>GitHub file URL</span>
+                    <input
+                      value={url}
+                      onChange={(event) => setUrl(event.target.value)}
+                      placeholder="https://github.com/org/repo/blob/main/src/file.ts"
+                      required
+                    />
+                  </label>
+                </>
+              ) : (
+                <div className="field field-wide">
+                  <span>Raw code payload</span>
+                  <div className="editor-frame compose-editor-frame">
+                    <div className="editor-toolbar">
+                      <div className="traffic-lights" aria-hidden="true">
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                      <span className="editor-tab">raw-review-input.{language || 'ts'}</span>
+                      <span className="editor-badge">Editable Monaco editor</span>
+                    </div>
+
+                    <div className="editor-wrapper compose-editor-wrapper">
+                      <Editor
+                        height="100%"
+                        defaultLanguage="typescript"
+                        language={language || 'typescript'}
+                        value={code}
+                        theme="codelens-dark"
+                        beforeMount={configureMonaco}
+                        onChange={(value) => setCode(value ?? '')}
+                        options={{
+                          ...sharedEditorOptions,
+                          readOnly: false,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <label className="field">
+                <span>{composeMode === 'github' ? 'Language hint' : 'Editor language'}</span>
+                <input
+                  value={language}
+                  onChange={(event) => setLanguage(event.target.value)}
+                  placeholder="typescript"
+                />
+              </label>
+
+              <div className="modal-actions">
+                <button className="ghost-button" type="button" onClick={() => setIsCreateModalOpen(false)}>
+                  Cancel
+                </button>
+                <button className="primary-button submit-button" type="submit">
+                  {reviewsState.submitStatus === 'submitting' ? 'Submitting...' : 'Create review'}
+                  <Send size={16} />
+                </button>
+              </div>
+            </form>
+
+            {reviewsState.error ? <p className="error-banner">{reviewsState.error}</p> : null}
+          </section>
+        </div>
+      ) : null}
+
+      {isReviewModalOpen && selectedReview ? (
+        <div className="modal-backdrop" onClick={() => setIsReviewModalOpen(false)} role="presentation">
+          <section
+            className="modal-shell review-detail-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Review details"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="review-detail-header">
+              <div>
+                <p className="section-label">Review detail</p>
+                <h3>{selectedReview.title ?? 'Untitled review'}</h3>
+                <p className="review-detail-meta">
+                  <CalendarDays size={14} />
+                  {formattedTimestamp}
+                </p>
+              </div>
+              <div className="review-detail-actions">
+                {selectedReview.githubUrl && selectedReview.githubUrl !== 'Manual Paste' ? (
+                  <a className="ghost-button compact" href={selectedReview.githubUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink size={14} />
+                    Source
+                  </a>
+                ) : null}
                 <button
                   className="ghost-button compact"
                   type="button"
-                  onClick={() => copyToClipboard(selectedReviewPayload)}
+                  onClick={() => copyToClipboard(selectedReview._id ?? '')}
                 >
                   <Copy size={14} />
-                  Copy
+                  Copy ID
                 </button>
-                <button
-                  className="ghost-button compact"
-                  type="button"
-                  onClick={() => downloadFile('selected-review.json', selectedReviewPayload)}
-                >
-                  <Download size={14} />
-                  Download
+                <button className="ghost-button compact" type="button" onClick={handleReviewRefresh}>
+                  <RefreshCcw size={14} />
+                  Refresh
                 </button>
-                <button
-                  className="ghost-button compact"
-                  type="button"
-                  onClick={() => setIsPayloadModalOpen(false)}
-                >
+                <button className="ghost-button compact" type="button" onClick={handleDeleteReview}>
+                  <Trash2 size={14} />
+                  Delete
+                </button>
+                <button className="ghost-button compact" type="button" onClick={() => setIsReviewModalOpen(false)}>
                   Close
                 </button>
               </div>
             </div>
 
-            <div className="modal-details-grid">
-              <section className="modal-info-card">
-                <div className="modal-card-header">
-                  <div className="metric-icon">
-                    <FileCode2 size={18} />
-                  </div>
-                  <div>
-                    <p className="metric-label">Review identity</p>
-                    <strong>{selectedReview?.title ?? 'Untitled review'}</strong>
-                  </div>
-                </div>
-                <div className="detail-list">
-                  <div className="detail-row">
-                    <span>ID</span>
-                    <code>{selectedReview?._id ?? 'Unavailable'}</code>
-                  </div>
-                  <div className="detail-row">
-                    <span>Language</span>
-                    <strong>{selectedReview?.language ?? 'Unknown'}</strong>
-                  </div>
-                  <div className="detail-row">
-                    <span>Status</span>
-                    <strong>{selectedReview?.status ?? 'Unknown'}</strong>
-                  </div>
-                  <div className="detail-row">
-                    <span>User ID</span>
-                    <code>{selectedReview?.userId ?? 'Unavailable'}</code>
-                  </div>
-                </div>
-              </section>
+            <div className="review-detail-grid">
+              <article className="review-detail-card">
+                <p className="section-label">Language</p>
+                <strong>{selectedReview.language ?? 'Unknown'}</strong>
+              </article>
+              <article className="review-detail-card">
+                <p className="section-label">GitHub URL</p>
+                <strong>{selectedReview.githubUrl || 'Manual paste'}</strong>
+              </article>
+              <article className="review-detail-card">
+                <p className="section-label">Status</p>
+                <strong>{selectedReview.status ?? 'Unknown'}</strong>
+              </article>
+            </div>
 
-              <section className="modal-info-card">
-                <div className="modal-card-header">
-                  <div className="metric-icon">
-                    <GitBranch size={18} />
-                  </div>
-                  <div>
-                    <p className="metric-label">Source and timing</p>
-                    <strong>{selectedReview?.githubUrl || 'Manual paste'}</strong>
-                  </div>
-                </div>
-                <div className="detail-list">
-                  <div className="detail-row">
-                    <span>Created at</span>
-                    <strong>{selectedReview?.createdAt ?? 'Unavailable'}</strong>
-                  </div>
-                  <div className="detail-row">
-                    <span>Origin</span>
-                    <strong>
-                      {selectedReview?.githubUrl && selectedReview.githubUrl !== 'Manual Paste'
-                        ? 'GitHub file'
-                        : 'Manual paste'}
-                    </strong>
-                  </div>
-                </div>
-              </section>
+            <section className="review-detail-section">
+              <p className="section-label">AI summary</p>
+              <h3>{selectedReview.aiSuggestions?.summary ?? 'No AI summary yet'}</h3>
+            </section>
 
-              <section className="modal-info-card">
-                <div className="modal-card-header">
-                  <div className="metric-icon">
-                    <Bot size={18} />
-                  </div>
-                  <div>
-                    <p className="metric-label">AI review</p>
-                    <strong>{selectedReview?.aiSuggestions?.summary ?? 'No AI summary yet'}</strong>
-                  </div>
-                </div>
-                <div className="detail-list">
-                  <div className="detail-row">
-                    <span>Score</span>
-                    <strong>{selectedReview?.aiSuggestions?.score ?? 0}/10</strong>
-                  </div>
-                  <div className="detail-block">
-                    <span>Critical bugs</span>
-                    {(selectedReview?.aiSuggestions?.criticalBugs ?? []).length ? (
-                      <div className="badge-list">
-                        {(selectedReview?.aiSuggestions?.criticalBugs ?? []).map((bug) => (
-                          <span className="data-badge" key={bug}>
-                            {bug}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p>No critical bugs returned.</p>
-                    )}
-                  </div>
-                  <div className="detail-block">
-                    <span>Optimizations</span>
-                    {(selectedReview?.aiSuggestions?.optimizations ?? []).length ? (
-                      <div className="badge-list">
-                        {(selectedReview?.aiSuggestions?.optimizations ?? []).map((optimization) => (
-                          <span className="data-badge" key={optimization}>
-                            {optimization}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p>No optimizations returned.</p>
-                    )}
-                  </div>
-                </div>
-              </section>
+            <div className="review-detail-lists">
+              <div>
+                <p className="section-label">Critical bugs</p>
+                <ul className="review-detail-list">
+                  {criticalBugs.length ? (
+                    criticalBugs.map((bug) => <li key={bug}>{bug}</li>)
+                  ) : (
+                    <li>No critical bugs reported.</li>
+                  )}
+                </ul>
+              </div>
+              <div>
+                <p className="section-label">Optimizations</p>
+                <ul className="review-detail-list">
+                  {optimizations.length ? (
+                    optimizations.map((optimization) => <li key={optimization}>{optimization}</li>)
+                  ) : (
+                    <li>No optimizations reported.</li>
+                  )}
+                </ul>
+              </div>
+              <div className="review-detail-score">
+                <p className="section-label">Score</p>
+                <strong>{selectedReview.aiSuggestions?.score ?? 0}/10</strong>
+              </div>
+            </div>
 
+            <div className="review-detail-editors">
               <section className="modal-code-panel">
                 <div className="response-panel-header">
                   <div>
                     <p className="section-label">Original code</p>
-                    <h3>{selectedReview?.title ?? 'Stored submission'}</h3>
+                    <h3>{selectedReview.title ?? 'Stored submission'}</h3>
                   </div>
                   <div className="panel-actions">
-                    <button
-                      className="ghost-button compact"
-                      type="button"
-                      onClick={() => copyToClipboard(selectedReview?.code ?? '')}
-                    >
+                    <button className="ghost-button compact" type="button" onClick={() => copyToClipboard(selectedReview.code ?? '')}>
                       <Copy size={14} />
                       Copy
                     </button>
@@ -792,8 +566,8 @@ export function WorkspacePage() {
                       type="button"
                       onClick={() =>
                         downloadFile(
-                          `${selectedReview?.title ?? 'original-code'}.${selectedReview?.language ?? 'txt'}`,
-                          selectedReview?.code ?? '',
+                          `${selectedReview.title ?? 'original-code'}.${selectedReview.language ?? 'txt'}`,
+                          selectedReview.code ?? '',
                         )
                       }
                     >
@@ -802,7 +576,6 @@ export function WorkspacePage() {
                     </button>
                   </div>
                 </div>
-
                 <div className="editor-frame modal-editor-frame">
                   <div className="editor-toolbar">
                     <div className="traffic-lights" aria-hidden="true">
@@ -810,16 +583,15 @@ export function WorkspacePage() {
                       <span />
                       <span />
                     </div>
-                    <span className="editor-tab">review-source.{selectedReview?.language ?? 'txt'}</span>
-                    <span className="editor-badge">Original payload</span>
+                    <span className="editor-tab">review-source.{selectedReview.language ?? 'txt'}</span>
+                    <span className="editor-badge">Read only</span>
                   </div>
-
                   <div className="editor-wrapper modal-code-wrapper">
                     <Editor
                       height="100%"
                       defaultLanguage="typescript"
-                      language={selectedReview?.language ?? 'typescript'}
-                      value={selectedReview?.code ?? '// No code available'}
+                      language={selectedReview.language ?? 'typescript'}
+                      value={selectedReview.code ?? '// No code available'}
                       theme="codelens-dark"
                       beforeMount={configureMonaco}
                       options={{
@@ -835,37 +607,19 @@ export function WorkspacePage() {
                 <div className="response-panel-header">
                   <div>
                     <p className="section-label">AI corrected code</p>
-                    <h3>Suggested output</h3>
+                    <h3>Editable suggestion</h3>
                   </div>
                   <div className="panel-actions">
-                    <button
-                      className="ghost-button compact"
-                      type="button"
-                      onClick={() =>
-                        copyToClipboard(
-                          selectedReview?.aiSuggestions?.correctedCode || '// No corrected code returned',
-                        )
-                      }
-                    >
+                    <button className="ghost-button compact" type="button" onClick={handleCopyCorrectedCode}>
                       <Copy size={14} />
                       Copy
                     </button>
-                    <button
-                      className="ghost-button compact"
-                      type="button"
-                      onClick={() =>
-                        downloadFile(
-                          `ai-corrected-output.${selectedReview?.language ?? 'txt'}`,
-                          selectedReview?.aiSuggestions?.correctedCode || '// No corrected code returned',
-                        )
-                      }
-                    >
+                    <button className="ghost-button compact" type="button" onClick={handleDownloadCorrectedCode}>
                       <Download size={14} />
                       Download
                     </button>
                   </div>
                 </div>
-
                 <div className="editor-frame modal-editor-frame">
                   <div className="editor-toolbar">
                     <div className="traffic-lights" aria-hidden="true">
@@ -873,45 +627,27 @@ export function WorkspacePage() {
                       <span />
                       <span />
                     </div>
-                    <span className="editor-tab">review-corrected.{selectedReview?.language ?? 'txt'}</span>
-                    <span className="editor-badge">AI suggestion</span>
+                    <span className="editor-tab">review-corrected.{selectedReview.language ?? 'txt'}</span>
+                    <span className="editor-badge">Editable</span>
                   </div>
-
                   <div className="editor-wrapper modal-code-wrapper">
                     <Editor
                       height="100%"
                       defaultLanguage="typescript"
-                      language={selectedReview?.language ?? 'typescript'}
-                      value={
-                        selectedReview?.aiSuggestions?.correctedCode || '// No corrected code returned'
-                      }
+                      language={selectedReview.language ?? 'typescript'}
+                      value={editableCorrectedCode}
                       theme="codelens-dark"
                       beforeMount={configureMonaco}
+                      onChange={(value) => setEditableCorrectedCode(value ?? correctedCodePlaceholder)}
                       options={{
                         ...sharedEditorOptions,
-                        readOnly: true,
+                        readOnly: false,
                       }}
                     />
                   </div>
                 </div>
               </section>
             </div>
-
-            <section className="modal-audit-strip">
-              <div className="modal-card-header">
-                <div className="metric-icon">
-                  <CalendarDays size={18} />
-                </div>
-                <div>
-                  <p className="metric-label">Raw payload export</p>
-                  <strong>Still available when you need it</strong>
-                </div>
-              </div>
-              <p>
-                The full stored review is presented as UI above, and you can still copy or
-                download the raw payload for debugging or sharing.
-              </p>
-            </section>
           </section>
         </div>
       ) : null}

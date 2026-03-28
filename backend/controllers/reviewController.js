@@ -1,5 +1,6 @@
 const Review = require('../models/Review');
 const axios = require('axios');
+const prettier = require('prettier');
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 // --- HELPER FUNCTIONS ---
@@ -39,6 +40,35 @@ function safeJsonParse(rawText) {
         return JSON.parse(rawText);
     } catch (error) {
         return null;
+    }
+}
+
+function formatWithPrettier(code, language) {
+    if (typeof code !== 'string' || !code.trim()) return code;
+
+    const parserMap = {
+        javascript: 'babel',
+        jsx: 'babel',
+        typescript: 'typescript',
+        tsx: 'typescript',
+        json: 'json',
+        css: 'css',
+        scss: 'scss',
+        html: 'html',
+        markdown: 'markdown'
+    };
+
+    const parser = parserMap[(language || '').toLowerCase()] || 'babel';
+
+    try {
+        return prettier.format(code, {
+            parser,
+            semi: true,
+            singleQuote: true
+        });
+    } catch (error) {
+        console.warn('Prettier formatting failed:', error.message);
+        return code;
     }
 }
 
@@ -94,7 +124,7 @@ async function generateGroqReview(language, code) {
             criticalBugs: [],
             optimizations: ['Set GROQ_API_KEY in backend/.env'],
             score: 0,
-            correctedCode: code
+            correctedCode: formatWithPrettier(code, language)
         };
     }
 
@@ -103,7 +133,16 @@ async function generateGroqReview(language, code) {
         ? 'Code truncated for length; highlight any assumptions where context may be missing.'
         : 'Full code provided.';
 
-    const prompt = `Return only JSON with keys summary,criticalBugs,optimizations,score,correctedCode.\nRules: summary max 20 words; max 3 bugs; max 3 optimizations; score 0-10 integer; correctedCode must be improved runnable code.\n${contextNote}\nLanguage: ${language}\nCode:\n${inputCode}`;
+    const prompt = [
+        'Return only JSON with keys summary,criticalBugs,optimizations,score,correctedCode.',
+        'Rules: summary max 20 words; max 3 bugs; max 3 optimizations; score 0-10 integer.',
+        'correctedCode must be runnable, fully indented like a Prettier output, and include concise inline comments describing the adjustments.',
+        'Add missing braces, semicolons, or spacing so the output reads like production-ready code.',
+        contextNote,
+        `Language: ${language}`,
+        'Code:',
+        inputCode
+    ].join('\n');
 
     try {
         const response = await axios.post(
@@ -130,12 +169,15 @@ async function generateGroqReview(language, code) {
         const raw = response.data?.choices?.[0]?.message?.content || '{}';
         const parsed = safeJsonParse(raw) || {};
 
+        const correctedCandidate = typeof parsed.correctedCode === 'string' && parsed.correctedCode.trim()
+            ? parsed.correctedCode
+            : code;
         return {
             summary: String(parsed.summary || 'No summary provided.'),
             criticalBugs: Array.isArray(parsed.criticalBugs) ? parsed.criticalBugs : [],
             optimizations: Array.isArray(parsed.optimizations) ? parsed.optimizations : [],
             score: Number.isFinite(Number(parsed.score)) ? Math.max(0, Math.min(10, Number(parsed.score))) : 0,
-            correctedCode: typeof parsed.correctedCode === 'string' && parsed.correctedCode.trim() ? parsed.correctedCode : code
+            correctedCode: formatWithPrettier(correctedCandidate, language)
         };
     } catch (error) {
         return {
@@ -143,7 +185,7 @@ async function generateGroqReview(language, code) {
             criticalBugs: [],
             optimizations: ['Check API quota or connection.'],
             score: 0,
-            correctedCode: code
+            correctedCode: formatWithPrettier(code, language)
         };
     }
 }
