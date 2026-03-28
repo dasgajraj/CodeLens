@@ -464,6 +464,23 @@
   color: var(--muted-strong);
 }
 
+.alert-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1.2rem;
+  border-radius: 20px;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.alert-banner strong {
+  color: #fecaca;
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
 .page-shell {
   display: flex;
   flex-direction: column;

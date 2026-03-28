@@ -11,8 +11,6 @@ type WarmupResult = {
   refresh: () => void
 }
 
-const WARMUP_RETRY_DELAY = 2000
-
 export const useBackendWarmup = (): WarmupResult => {
   const [state, setState] = useState<WarmupState>('idle')
   const [latencyMs, setLatency] = useState<number | null>(null)
@@ -39,7 +37,6 @@ export const useBackendWarmup = (): WarmupResult => {
         const mapped = mapAxiosError(error)
         setErrorMessage(mapped.message)
         setState('error')
-        setTimeout(runWarmup, WARMUP_RETRY_DELAY)
       }
     }
 

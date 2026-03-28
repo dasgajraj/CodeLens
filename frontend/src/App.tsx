@@ -3,10 +3,11 @@ import { BrowserRouter, NavLink, Route, Routes, useNavigate } from 'react-router
 import './App.css'
 import { useBackendWarmup } from './hooks/useBackendWarmup'
 import { LoadingScreen } from './components/LoadingScreen'
-import { HomePage, ThemeMode } from './pages/HomePage'
+import { HomePage } from './pages/HomePage'
+import type { ThemeMode } from './pages/HomePage'
 import { AuthPage } from './pages/AuthPage'
 import { ReviewsPage } from './pages/ReviewsPage'
-import { AuthTokens, AuthUser } from './types/auth'
+import type { AuthTokens, AuthUser } from './types/auth'
 import { getApiBaseUrl, mapAxiosError, reviewApi, setAuthToken } from './lib/api'
 
 type AuthState = {
@@ -43,6 +44,7 @@ function AppShell() {
   const [theme, setTheme] = useState<ThemeMode>('dark')
   const [authState, setAuthState] = useState<AuthState>({ user: null, tokens: null })
   const [reviewStats, setReviewStats] = useState<{ total: number; latestTitle?: string }>()
+  const [initialWarmupDone, setInitialWarmupDone] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -99,20 +101,20 @@ function AppShell() {
     setAuthState({ user: null, tokens: null })
   }
 
-  const gateStatus = warmup.state === 'idle' ? 'warming' : warmup.state
-  const normalizedStatus: 'warming' | 'ready' | 'error' =
-    gateStatus === 'ready' ? 'ready' : gateStatus === 'error' ? 'error' : 'warming'
+  useEffect(() => {
+    if (warmup.state === 'ready' || warmup.state === 'error') {
+      setInitialWarmupDone(true)
+    }
+  }, [warmup.state])
 
-  if (normalizedStatus !== 'ready') {
+  if (!initialWarmupDone) {
+    const status: 'warming' | 'error' = warmup.state === 'error' ? 'error' : 'warming'
     return (
-      <LoadingScreen
-        status={normalizedStatus}
-        latencyMs={warmup.latencyMs}
-        message={warmup.error}
-        onRetry={warmup.refresh}
-      />
+      <LoadingScreen status={status} latencyMs={warmup.latencyMs} message={warmup.error} onRetry={warmup.refresh} />
     )
   }
+
+  const warmupError = warmup.state === 'error' ? warmup.error ?? 'Unable to reach backend' : null
 
   return (
     <div className="app-container">
@@ -138,6 +140,18 @@ function AppShell() {
             <span className="badge">{authState.user ? authState.user.email : 'Guest session'}</span>
           </div>
         </header>
+
+        {warmupError ? (
+          <div className="alert-banner">
+            <div>
+              <strong>Backend sleeping</strong>
+              <p>{warmupError}</p>
+            </div>
+            <button className="ghost-button compact" type="button" onClick={warmup.refresh}>
+              Retry wake-up
+            </button>
+          </div>
+        ) : null}
 
         <Routes>
           <Route

@@ -1,4 +1,5 @@
-import { FC, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import type { FC } from 'react'
 import Editor from '@monaco-editor/react'
 import {
   Bell,

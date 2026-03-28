@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
 import { authApi, mapAxiosError, setAuthToken } from '../lib/api'
-import { AuthResponse, AuthTokens, AuthUser } from '../types/auth'
+import type { AuthResponse, AuthTokens, AuthUser } from '../types/auth'
 import '../App.css'
 
 type AuthPageProps = {
@@ -128,7 +129,7 @@ export const AuthPage = ({ onAuthSuccess, onLogout, currentUser, tokens }: AuthP
             { name: 'email', type: 'email', placeholder: 'you@example.com' },
             { name: 'password', type: 'password', placeholder: 'Strong password' },
           ],
-          () => authApi.signup(signupForm.values),
+          () => authApi.signup(signupForm.values).then((response) => response.data as AuthResponse),
           'Create account',
         )}
 
@@ -141,7 +142,7 @@ export const AuthPage = ({ onAuthSuccess, onLogout, currentUser, tokens }: AuthP
             { name: 'email', type: 'email' },
             { name: 'password', type: 'password' },
           ],
-          () => authApi.login(loginForm.values),
+          () => authApi.login(loginForm.values).then((response) => response.data as AuthResponse),
           'Sign in & store tokens',
         )}
 
@@ -151,7 +152,7 @@ export const AuthPage = ({ onAuthSuccess, onLogout, currentUser, tokens }: AuthP
           refreshForm,
           setRefreshForm,
           [{ name: 'refreshToken', placeholder: 'Paste refresh token' }],
-          () => authApi.refresh({ refreshToken: refreshForm.values.refreshToken }),
+          () => authApi.refresh({ refreshToken: refreshForm.values.refreshToken }).then((response) => response.data as { message: string; tokens?: AuthTokens }),
           'Refresh access token',
         )}
 
