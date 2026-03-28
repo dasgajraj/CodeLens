@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
-import { Activity, Bot, Command, ShieldCheck } from 'lucide-react'
+import { Activity, Bot, Command, House, ShieldCheck } from 'lucide-react'
 import './App.css'
 import { useAppDispatch, useAppSelector } from './app/hooks'
 import { bootstrapSession } from './features/auth/authSlice'
 import { AuthPage } from './pages/AuthPage'
+import { HomePage } from './pages/HomePage'
+import { UserPage } from './pages/UserPage'
 import { WorkspacePage } from './pages/WorkspacePage'
 
 function RouteStage() {
@@ -24,11 +26,6 @@ function ProtectedRoute() {
   }
 
   return <RouteStage />
-}
-
-function RootRedirect() {
-  const authStatus = useAppSelector((state) => state.auth.status)
-  return <Navigate to={authStatus === 'authenticated' ? '/workspace' : '/auth'} replace />
 }
 
 function BootScreen() {
@@ -65,6 +62,10 @@ function AppChrome() {
         </div>
 
         <nav className="topnav" aria-label="Primary navigation">
+          <NavLink to="/" className={({ isActive }) => `topnav-link ${isActive ? 'is-active' : ''}`}>
+            <House size={15} />
+            Home
+          </NavLink>
           <NavLink
             to="/workspace"
             className={({ isActive }) => `topnav-link ${isActive ? 'is-active' : ''}`}
@@ -72,13 +73,23 @@ function AppChrome() {
             <Command size={15} />
             Review fabric
           </NavLink>
-          <NavLink
-            to="/auth"
-            className={({ isActive }) => `topnav-link ${isActive ? 'is-active' : ''}`}
-          >
-            <ShieldCheck size={15} />
-            Identity vault
-          </NavLink>
+          {user ? (
+            <NavLink
+              to="/user"
+              className={({ isActive }) => `topnav-link ${isActive ? 'is-active' : ''}`}
+            >
+              <ShieldCheck size={15} />
+              Account
+            </NavLink>
+          ) : (
+            <NavLink
+              to="/auth"
+              className={({ isActive }) => `topnav-link ${isActive ? 'is-active' : ''}`}
+            >
+              <ShieldCheck size={15} />
+              Sign in
+            </NavLink>
+          )}
         </nav>
 
         <div className="topbar-status">
@@ -86,17 +97,26 @@ function AppChrome() {
             <Activity size={14} />
             API {health}
           </span>
-          <span className="status-pill">{user?.email ?? 'guest@codelens.dev'}</span>
+          {user ? (
+            <NavLink to="/user" className="status-pill status-pill-link">
+              {user.email}
+            </NavLink>
+          ) : (
+            <NavLink to="/auth" className="status-pill status-pill-link">
+              guest@codelens.dev
+            </NavLink>
+          )}
         </div>
       </header>
 
       <Routes>
-        <Route path="/" element={<RootRedirect />} />
+        <Route path="/" element={<HomePage />} />
         <Route element={<RouteStage />}>
           <Route path="/auth" element={<AuthPage />} />
         </Route>
         <Route element={<ProtectedRoute />}>
           <Route path="/workspace" element={<WorkspacePage />} />
+          <Route path="/user" element={<UserPage />} />
         </Route>
       </Routes>
     </div>

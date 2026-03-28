@@ -3,6 +3,9 @@ import Editor from '@monaco-editor/react'
 import {
   Bot,
   Code2,
+  Copy,
+  CalendarDays,
+  Download,
   ExternalLink,
   FileCode2,
   GitBranch,
@@ -24,6 +27,7 @@ import {
   selectReview,
 } from '../features/reviews/reviewsSlice'
 import type { Review } from '../types/api'
+import { configureMonaco, sharedEditorOptions } from '../utils/monaco'
 
 type ComposeMode = 'github' | 'paste'
 
@@ -45,6 +49,7 @@ export function WorkspacePage() {
   const [url, setUrl] = useState('')
   const [language, setLanguage] = useState('typescript')
   const [code, setCode] = useState(starterSnippet)
+  const [isPayloadModalOpen, setIsPayloadModalOpen] = useState(false)
   const hasLoadedInitialReviews = useRef(false)
 
   const selectedReview = useMemo(
@@ -60,6 +65,46 @@ export function WorkspacePage() {
           totalReviews,
       )
     : 0
+
+  const selectedReviewPayload = selectedReview
+    ? JSON.stringify(selectedReview, null, 2)
+    : JSON.stringify(
+        {
+          _id: '',
+          title: '',
+          code: '',
+          language: '',
+          githubUrl: '',
+          userId: '',
+          status: '',
+          aiSuggestions: {
+            summary: '',
+            criticalBugs: [],
+            optimizations: [],
+            score: 0,
+            correctedCode: '',
+          },
+          createdAt: '',
+        },
+        null,
+        2,
+      )
+
+  const copyToClipboard = async (value: string) => {
+    await navigator.clipboard.writeText(value)
+  }
+
+  const downloadFile = (filename: string, content: string) => {
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+    const objectUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(objectUrl)
+  }
 
   useEffect(() => {
     if (auth.status === 'authenticated' && !hasLoadedInitialReviews.current) {
@@ -282,16 +327,12 @@ export function WorkspacePage() {
                     defaultLanguage="typescript"
                     language={language || 'typescript'}
                     value={code}
-                    theme="vs-dark"
+                    theme="codelens-dark"
+                    beforeMount={configureMonaco}
                     onChange={(value) => setCode(value ?? '')}
                     options={{
+                      ...sharedEditorOptions,
                       readOnly: false,
-                      minimap: { enabled: false },
-                      fontSize: 14,
-                      lineNumbersMinChars: 3,
-                      wordWrap: 'on',
-                      scrollBeyondLastLine: false,
-                      automaticLayout: true,
                     }}
                   />
                 </div>
@@ -402,6 +443,29 @@ export function WorkspacePage() {
                 <p className="section-label">Original code</p>
                 <h3>{selectedReview?.language ?? language}</h3>
               </div>
+              <div className="panel-actions">
+                <button
+                  className="ghost-button compact"
+                  type="button"
+                  onClick={() => copyToClipboard(selectedReview?.code ?? '')}
+                >
+                  <Copy size={14} />
+                  Copy
+                </button>
+                <button
+                  className="ghost-button compact"
+                  type="button"
+                  onClick={() =>
+                    downloadFile(
+                      `${selectedReview?.title ?? 'original-code'}.${selectedReview?.language ?? language ?? 'txt'}`,
+                      selectedReview?.code ?? '',
+                    )
+                  }
+                >
+                  <Download size={14} />
+                  Download
+                </button>
+              </div>
             </div>
 
             <div className="editor-frame">
@@ -423,15 +487,11 @@ export function WorkspacePage() {
                   defaultLanguage="typescript"
                   language={selectedReview?.language ?? language ?? 'typescript'}
                   value={selectedReview?.code ?? '// No review selected yet'}
-                  theme="vs-dark"
+                  theme="codelens-dark"
+                  beforeMount={configureMonaco}
                   options={{
+                    ...sharedEditorOptions,
                     readOnly: true,
-                    minimap: { enabled: false },
-                    fontSize: 14,
-                    lineNumbersMinChars: 3,
-                    wordWrap: 'on',
-                    scrollBeyondLastLine: false,
-                    automaticLayout: true,
                   }}
                 />
               </div>
@@ -443,6 +503,35 @@ export function WorkspacePage() {
               <div>
                 <p className="section-label">AI suggested code</p>
                 <h3>Corrected output</h3>
+              </div>
+              <div className="panel-actions">
+                <button
+                  className="ghost-button compact"
+                  type="button"
+                  onClick={() =>
+                    copyToClipboard(
+                      selectedReview?.aiSuggestions?.correctedCode ||
+                        '// AI corrected code will appear here after a review is generated',
+                    )
+                  }
+                >
+                  <Copy size={14} />
+                  Copy
+                </button>
+                <button
+                  className="ghost-button compact"
+                  type="button"
+                  onClick={() =>
+                    downloadFile(
+                      `ai-corrected-output.${selectedReview?.language ?? language ?? 'txt'}`,
+                      selectedReview?.aiSuggestions?.correctedCode ||
+                        '// AI corrected code will appear here after a review is generated',
+                    )
+                  }
+                >
+                  <Download size={14} />
+                  Download
+                </button>
               </div>
             </div>
 
@@ -466,22 +555,366 @@ export function WorkspacePage() {
                     selectedReview?.aiSuggestions?.correctedCode ||
                     '// AI corrected code will appear here after a review is generated'
                   }
-                  theme="vs-dark"
+                  theme="codelens-dark"
+                  beforeMount={configureMonaco}
                   options={{
+                    ...sharedEditorOptions,
                     readOnly: true,
-                    minimap: { enabled: false },
-                    fontSize: 14,
-                    lineNumbersMinChars: 3,
-                    wordWrap: 'on',
-                    scrollBeyondLastLine: false,
-                    automaticLayout: true,
                   }}
                 />
               </div>
             </div>
           </section>
+
+          <section className="response-panel response-panel-wide">
+            <div className="response-panel-header">
+              <div>
+                <p className="section-label">Selected review payload</p>
+                <h3>Review details</h3>
+              </div>
+              <div className="panel-actions">
+                <button
+                  className="ghost-button compact"
+                  type="button"
+                  onClick={() => downloadFile('selected-review.json', selectedReviewPayload)}
+                >
+                  <Download size={14} />
+                  Download
+                </button>
+                <button
+                  className="ghost-button compact"
+                  type="button"
+                  onClick={() => setIsPayloadModalOpen(true)}
+                >
+                  <FileCode2 size={14} />
+                  View full review
+                </button>
+              </div>
+            </div>
+
+            <div className="review-meta-grid">
+              <article className="metric-card">
+                <div className="metric-icon">
+                  <FileCode2 size={18} />
+                </div>
+                <div>
+                  <p className="metric-label">Review id</p>
+                  <strong>{selectedReview?._id ?? 'Not selected'}</strong>
+                  <span>createdAt: {selectedReview?.createdAt ?? 'Unavailable'}</span>
+                </div>
+              </article>
+              <article className="metric-card">
+                <div className="metric-icon">
+                  <GitBranch size={18} />
+                </div>
+                <div>
+                  <p className="metric-label">Source</p>
+                  <strong>{selectedReview?.githubUrl || 'Manual paste'}</strong>
+                  <span>language: {selectedReview?.language ?? 'Unknown'}</span>
+                </div>
+              </article>
+              <article className="metric-card">
+                <div className="metric-icon">
+                  <Bot size={18} />
+                </div>
+                <div>
+                  <p className="metric-label">Ownership</p>
+                  <strong>{selectedReview?.userId ?? 'Unavailable'}</strong>
+                  <span>status: {selectedReview?.status ?? 'Unknown'}</span>
+                </div>
+              </article>
+            </div>
+          </section>
         </div>
       </section>
+
+      {isPayloadModalOpen ? (
+        <div className="modal-backdrop" onClick={() => setIsPayloadModalOpen(false)} role="presentation">
+          <section
+            className="modal-shell"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Full selected review payload"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="response-panel-header">
+              <div>
+                <p className="section-label">Selected review payload</p>
+                <h3>Full stored review</h3>
+              </div>
+              <div className="panel-actions">
+                <button
+                  className="ghost-button compact"
+                  type="button"
+                  onClick={() => copyToClipboard(selectedReviewPayload)}
+                >
+                  <Copy size={14} />
+                  Copy
+                </button>
+                <button
+                  className="ghost-button compact"
+                  type="button"
+                  onClick={() => downloadFile('selected-review.json', selectedReviewPayload)}
+                >
+                  <Download size={14} />
+                  Download
+                </button>
+                <button
+                  className="ghost-button compact"
+                  type="button"
+                  onClick={() => setIsPayloadModalOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="modal-details-grid">
+              <section className="modal-info-card">
+                <div className="modal-card-header">
+                  <div className="metric-icon">
+                    <FileCode2 size={18} />
+                  </div>
+                  <div>
+                    <p className="metric-label">Review identity</p>
+                    <strong>{selectedReview?.title ?? 'Untitled review'}</strong>
+                  </div>
+                </div>
+                <div className="detail-list">
+                  <div className="detail-row">
+                    <span>ID</span>
+                    <code>{selectedReview?._id ?? 'Unavailable'}</code>
+                  </div>
+                  <div className="detail-row">
+                    <span>Language</span>
+                    <strong>{selectedReview?.language ?? 'Unknown'}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Status</span>
+                    <strong>{selectedReview?.status ?? 'Unknown'}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>User ID</span>
+                    <code>{selectedReview?.userId ?? 'Unavailable'}</code>
+                  </div>
+                </div>
+              </section>
+
+              <section className="modal-info-card">
+                <div className="modal-card-header">
+                  <div className="metric-icon">
+                    <GitBranch size={18} />
+                  </div>
+                  <div>
+                    <p className="metric-label">Source and timing</p>
+                    <strong>{selectedReview?.githubUrl || 'Manual paste'}</strong>
+                  </div>
+                </div>
+                <div className="detail-list">
+                  <div className="detail-row">
+                    <span>Created at</span>
+                    <strong>{selectedReview?.createdAt ?? 'Unavailable'}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Origin</span>
+                    <strong>
+                      {selectedReview?.githubUrl && selectedReview.githubUrl !== 'Manual Paste'
+                        ? 'GitHub file'
+                        : 'Manual paste'}
+                    </strong>
+                  </div>
+                </div>
+              </section>
+
+              <section className="modal-info-card">
+                <div className="modal-card-header">
+                  <div className="metric-icon">
+                    <Bot size={18} />
+                  </div>
+                  <div>
+                    <p className="metric-label">AI review</p>
+                    <strong>{selectedReview?.aiSuggestions?.summary ?? 'No AI summary yet'}</strong>
+                  </div>
+                </div>
+                <div className="detail-list">
+                  <div className="detail-row">
+                    <span>Score</span>
+                    <strong>{selectedReview?.aiSuggestions?.score ?? 0}/10</strong>
+                  </div>
+                  <div className="detail-block">
+                    <span>Critical bugs</span>
+                    {(selectedReview?.aiSuggestions?.criticalBugs ?? []).length ? (
+                      <div className="badge-list">
+                        {(selectedReview?.aiSuggestions?.criticalBugs ?? []).map((bug) => (
+                          <span className="data-badge" key={bug}>
+                            {bug}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p>No critical bugs returned.</p>
+                    )}
+                  </div>
+                  <div className="detail-block">
+                    <span>Optimizations</span>
+                    {(selectedReview?.aiSuggestions?.optimizations ?? []).length ? (
+                      <div className="badge-list">
+                        {(selectedReview?.aiSuggestions?.optimizations ?? []).map((optimization) => (
+                          <span className="data-badge" key={optimization}>
+                            {optimization}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p>No optimizations returned.</p>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              <section className="modal-code-panel">
+                <div className="response-panel-header">
+                  <div>
+                    <p className="section-label">Original code</p>
+                    <h3>{selectedReview?.title ?? 'Stored submission'}</h3>
+                  </div>
+                  <div className="panel-actions">
+                    <button
+                      className="ghost-button compact"
+                      type="button"
+                      onClick={() => copyToClipboard(selectedReview?.code ?? '')}
+                    >
+                      <Copy size={14} />
+                      Copy
+                    </button>
+                    <button
+                      className="ghost-button compact"
+                      type="button"
+                      onClick={() =>
+                        downloadFile(
+                          `${selectedReview?.title ?? 'original-code'}.${selectedReview?.language ?? 'txt'}`,
+                          selectedReview?.code ?? '',
+                        )
+                      }
+                    >
+                      <Download size={14} />
+                      Download
+                    </button>
+                  </div>
+                </div>
+
+                <div className="editor-frame modal-editor-frame">
+                  <div className="editor-toolbar">
+                    <div className="traffic-lights" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                    <span className="editor-tab">review-source.{selectedReview?.language ?? 'txt'}</span>
+                    <span className="editor-badge">Original payload</span>
+                  </div>
+
+                  <div className="editor-wrapper modal-code-wrapper">
+                    <Editor
+                      height="100%"
+                      defaultLanguage="typescript"
+                      language={selectedReview?.language ?? 'typescript'}
+                      value={selectedReview?.code ?? '// No code available'}
+                      theme="codelens-dark"
+                      beforeMount={configureMonaco}
+                      options={{
+                        ...sharedEditorOptions,
+                        readOnly: true,
+                      }}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <section className="modal-code-panel">
+                <div className="response-panel-header">
+                  <div>
+                    <p className="section-label">AI corrected code</p>
+                    <h3>Suggested output</h3>
+                  </div>
+                  <div className="panel-actions">
+                    <button
+                      className="ghost-button compact"
+                      type="button"
+                      onClick={() =>
+                        copyToClipboard(
+                          selectedReview?.aiSuggestions?.correctedCode || '// No corrected code returned',
+                        )
+                      }
+                    >
+                      <Copy size={14} />
+                      Copy
+                    </button>
+                    <button
+                      className="ghost-button compact"
+                      type="button"
+                      onClick={() =>
+                        downloadFile(
+                          `ai-corrected-output.${selectedReview?.language ?? 'txt'}`,
+                          selectedReview?.aiSuggestions?.correctedCode || '// No corrected code returned',
+                        )
+                      }
+                    >
+                      <Download size={14} />
+                      Download
+                    </button>
+                  </div>
+                </div>
+
+                <div className="editor-frame modal-editor-frame">
+                  <div className="editor-toolbar">
+                    <div className="traffic-lights" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                    <span className="editor-tab">review-corrected.{selectedReview?.language ?? 'txt'}</span>
+                    <span className="editor-badge">AI suggestion</span>
+                  </div>
+
+                  <div className="editor-wrapper modal-code-wrapper">
+                    <Editor
+                      height="100%"
+                      defaultLanguage="typescript"
+                      language={selectedReview?.language ?? 'typescript'}
+                      value={
+                        selectedReview?.aiSuggestions?.correctedCode || '// No corrected code returned'
+                      }
+                      theme="codelens-dark"
+                      beforeMount={configureMonaco}
+                      options={{
+                        ...sharedEditorOptions,
+                        readOnly: true,
+                      }}
+                    />
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <section className="modal-audit-strip">
+              <div className="modal-card-header">
+                <div className="metric-icon">
+                  <CalendarDays size={18} />
+                </div>
+                <div>
+                  <p className="metric-label">Raw payload export</p>
+                  <strong>Still available when you need it</strong>
+                </div>
+              </div>
+              <p>
+                The full stored review is presented as UI above, and you can still copy or
+                download the raw payload for debugging or sharing.
+              </p>
+            </section>
+          </section>
+        </div>
+      ) : null}
     </main>
   )
 }
