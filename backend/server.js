@@ -67,13 +67,14 @@ app.use(errorHandler);
 
 // --- DATABASE + SERVER START ---
 const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 mongoose
     .connect(process.env.MONGO_URI)
     .then(() => {
         console.log('Connected to MongoDB');
-        const server = app.listen(PORT, () => {
-            console.log(`Server is running on port ${PORT}`);
+        const server = app.listen(PORT, HOST, () => {
+            console.log(`Server is running on http://${HOST}:${PORT}`);
         });
 
         // Graceful shutdown — prevents abrupt kills on Ctrl+C or deployment restarts
