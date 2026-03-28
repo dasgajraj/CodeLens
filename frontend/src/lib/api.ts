@@ -1,4 +1,4 @@
-import axios, { AxiosError } from 'axios'
+import axios from 'axios'
 
 export type ApiError = {
   message: string
@@ -13,10 +13,7 @@ export const api = axios.create({
   timeout: 15000,
 })
 
-let authToken: string | null = null
-
 export const setAuthToken = (token: string | null) => {
-  authToken = token
   if (token) {
     api.defaults.headers.common.Authorization = `Bearer ${token}`
   } else {

@@ -1,4 +1,4 @@
-import { FC } from 'react'
+import type { FC } from 'react'
 import { Cloud, Loader2 } from 'lucide-react'
 import '../App.css'
 

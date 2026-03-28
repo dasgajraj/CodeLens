@@ -1,320 +1,190 @@
-import { FC, useMemo, useState } from 'react'
-import Editor from '@monaco-editor/react'
 import {
-  Bell,
+  ArrowRight,
   Bot,
-  CheckCircle2,
-  ChevronRight,
-  Cloud,
+  ChartColumnBig,
   Command,
-  Gauge,
-  GitBranch,
-  Lock,
-  Moon,
-  PanelRight,
-  Play,
+  FileCode2,
   ShieldCheck,
   Sparkles,
-  SunMedium,
 } from 'lucide-react'
-import '../App.css'
+import { Link } from 'react-router-dom'
+import { useAppSelector } from '../app/hooks'
 
-export type ThemeMode = 'dark' | 'light'
+export function HomePage() {
+  const auth = useAppSelector((state) => state.auth)
+  const reviews = useAppSelector((state) => state.reviews.items)
 
-const editorSnippet = `import { reviewCode } from "@codelens/sdk";
+  const totalReviews = reviews.length
+  const latestReview = reviews[0]
+  const averageScore = totalReviews
+    ? Math.round(
+        reviews.reduce((sum, review) => sum + (review.aiSuggestions?.score ?? 0), 0) / totalReviews,
+      )
+    : 0
 
-export async function runAnalysis() {
-  const result = await reviewCode({
-    repository: "frontend/src/App.tsx",
-    prompt: "Surface regressions, risky async paths, and UX polish gaps.",
-    mode: "autofix",
-  });
-
-  return {
-    summary: result.summary,
-    confidence: result.confidence,
-    suggestions: result.suggestions.slice(0, 3),
-  };
-}`
-
-const suggestionChips = ['Refactor effect ownership', 'Tighten auth middleware', 'Improve test naming']
-
-type HomePageProps = {
-  theme: ThemeMode
-  isAuthenticated: boolean
-  onToggleTheme: () => void
-  onSignOut?: () => void
-  onNavigateAuth?: () => void
-  backendLatency?: number | null
-  reviewStats?: {
-    total: number
-    latestTitle?: string
-  }
-}
-
-export const HomePage: FC<HomePageProps> = ({
-  theme,
-  isAuthenticated,
-  onToggleTheme,
-  onSignOut,
-  onNavigateAuth,
-  backendLatency,
-  reviewStats,
-}) => {
-  const [panelOpen, setPanelOpen] = useState(true)
-
-  const workspaceCards = useMemo(
-    () => [
-      {
-        label: 'API health latency',
-        value: backendLatency ? `${backendLatency}ms` : 'Booting...',
-        meta: 'Measured from your browser',
-        icon: Gauge,
-      },
-      {
-        label: 'Protected branches',
-        value: '24',
-        meta: 'Policy synced 3 mins ago',
-        icon: GitBranch,
-      },
-      {
-        label: 'Stored reviews',
-        value: reviewStats?.total ? String(reviewStats.total) : '0',
-        meta:
-          reviewStats?.latestTitle ? `Latest: ${reviewStats.latestTitle}` : 'No reviews ingested yet',
-        icon: Cloud,
-      },
-    ],
-    [backendLatency, reviewStats?.latestTitle, reviewStats?.total],
-  )
-
-  const statusItems = useMemo(
-    () => [
-      {
-        title: 'Inference stream',
-        value: isAuthenticated ? 'Live' : 'Paused',
-        detail: isAuthenticated ? 'AI copilots attached to workspace' : 'Sign in to sync suggestions',
-        icon: Bot,
-      },
-      {
-        title: 'Theme store',
-        value: theme === 'dark' ? 'Dark' : 'Light',
-        detail: 'Global preference reflected across shell surfaces',
-        icon: theme === 'dark' ? Moon : SunMedium,
-      },
-      {
-        title: 'Secure reviews',
-        value: 'Enabled',
-        detail: 'Branch protections and policy scans are active',
-        icon: ShieldCheck,
-      },
-    ],
-    [isAuthenticated, theme],
-  )
-
-  const editorTheme = theme === 'dark' ? 'vs-dark' : 'light'
-  const authLabel = isAuthenticated ? 'Authenticated' : 'Guest mode'
-
-  const handleAuthButton = () => {
-    if (isAuthenticated && onSignOut) {
-      onSignOut()
-      return
-    }
-    onNavigateAuth?.()
-  }
+  const heroCtaHref = auth.status === 'authenticated' ? '/workspace' : '/auth'
+  const isGuest = auth.status !== 'authenticated'
+  const blurMessage = ''
 
   return (
-    <div className="app-shell">
-      <div className="app-backdrop" />
-      <main className="dashboard" aria-label="CodeLens dashboard">
-        <section className="hero-panel surface">
-          <div className="hero-copy">
-            <div className="eyebrow">
-              <span className="eyebrow-dot" />
-              Modern Dark Engineering
-            </div>
-            <h1>CodeLens turns code review into a calm, high-signal workspace.</h1>
-            <p>
-              A human-crafted dashboard for shipping safer code, faster feedback, and AI suggestions that feel
-              integrated instead of bolted on.
-            </p>
+    <main className="home-grid">
+      <section className="surface home-hero">
+        <div className="hero-column hero-primary">
+          <div className="hero-badge">
+            <Sparkles size={16} />
+            Review fabric for builders
           </div>
+          <h1>Readable review intelligence, from first paste to final fix.</h1>
+          <p>
+            CodeLens keeps your AI review history aligned, showing editable input, captured payloads,
+            and corrected output without bouncing between tools.
+          </p>
 
           <div className="hero-actions">
-            <button className="primary-button" type="button">
-              <Play size={16} />
-              Run Deep Review
-            </button>
-            <button className="ghost-button" type="button">
-              <Command size={16} />
-              Open Command Bar
-            </button>
+            <Link className="primary-button" to={heroCtaHref}>
+              {auth.status === 'authenticated' ? 'Open workspace' : 'Get started'}
+              <ArrowRight size={16} />
+            </Link>
+            <Link className="ghost-button" to={auth.status === 'authenticated' ? '/user' : '/auth'}>
+              {auth.status === 'authenticated' ? 'Profile & session' : 'Launch demo mode'}
+            </Link>
           </div>
 
-          <div className="status-strip">
-            <span className="status-pill status-pill-live">
-              <CheckCircle2 size={14} />
-              {authLabel}
-            </span>
-            <span className="status-pill">
-              <Bell size={14} />
-              3 high-confidence suggestions
-            </span>
-            <span className="status-pill">
-              <Sparkles size={14} />
-              Spring transitions enabled
-            </span>
-          </div>
-        </section>
-
-        <section className="left-rail surface glass-panel">
-          <div className="rail-header">
-            <div>
-              <p className="section-label">Workspace</p>
-              <h2>Signal overview</h2>
-            </div>
-            <button className="icon-button" type="button" onClick={onToggleTheme} aria-label="Toggle theme">
-              {theme === 'dark' ? <SunMedium size={16} /> : <Moon size={16} />}
-            </button>
-          </div>
-
-          <div className="metric-list">
-            {workspaceCards.map(({ label, value, meta, icon: Icon }) => (
-              <article className="metric-card" key={label}>
-                <div className="metric-icon">
-                  <Icon size={18} />
-                </div>
-                <div>
-                  <p className="metric-label">{label}</p>
-                  <strong>{value}</strong>
-                  <span>{meta}</span>
-                </div>
+          <div className={`blur-guard ${isGuest ? 'is-locked' : ''}`}>
+            <div className="hero-metrics">
+              <article className="hero-pill">
+                <p className="metric-label">Latest summary</p>
+                <strong>{latestReview?.aiSuggestions?.summary ?? 'AI analysis waiting'}</strong>
+                <span>
+                  {latestReview
+                    ? `${latestReview.language ?? 'Code'} review · ${latestReview.title}`
+                    : 'Generate a review to populate your feed.'}
+                </span>
               </article>
-            ))}
+              <article className="hero-pill">
+                <p className="metric-label">Session state</p>
+                <strong>{auth.status === 'authenticated' ? 'Authenticated' : 'Guest'}</strong>
+                <span>{auth.user?.email ?? 'Sign in to sync history and tokens.'}</span>
+              </article>
+            </div>
+            {isGuest ? <div className="blur-guard-overlay">{blurMessage}</div> : null}
+          </div>
+        </div>
+
+        <div className="hero-column hero-panel hero-secondary">
+          <div className="panel-header">
+            <div>
+              <p className="section-label">Workspace focus</p>
+              <h2>Everything aligned in a single pass.</h2>
+            </div>
+            <Command size={18} />
           </div>
 
-          <div className="store-panel">
-            <div className="store-header">
+          <ul className="hero-list">
+            <li>
+              <span className="timeline-marker" />
               <div>
-                <p className="section-label">Global state</p>
-                <h3>API-aware shell</h3>
+                <strong>Editable Monaco input</strong>
+                <p>Paste raw snippets with syntax color, edit, and resend without losing history.</p>
               </div>
-              <button className="ghost-button compact" type="button" onClick={handleAuthButton}>
-                <Lock size={14} />
-                {isAuthenticated ? 'Sign out' : 'Connect account'}
-              </button>
-            </div>
+            </li>
+            <li>
+              <span className="timeline-marker" />
+              <div>
+                <strong>Full payload inspection</strong>
+                <p>Inspect stored `_id`, `status`, `aiSuggestions`, and corrected code side by side.</p>
+              </div>
+            </li>
+            <li>
+              <span className="timeline-marker" />
+              <div>
+                <strong>Readable account trail</strong>
+                <p>Navigate to the dedicated account page for session tokens, identity, and logout.</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </section>
 
-            <div className="store-grid">
-              {statusItems.map(({ title, value, detail, icon: Icon }) => (
-                <article className="store-card" key={title}>
-                  <Icon size={18} />
-                  <p>{title}</p>
-                  <strong>{value}</strong>
-                  <span>{detail}</span>
-                </article>
-              ))}
+      <div className={`blur-guard ${isGuest ? 'is-locked' : ''}`}>
+        <section className="home-columns">
+          <article className="surface metric-card highlight">
+            <div className="metric-icon">
+              <FileCode2 size={18} />
             </div>
-          </div>
-        </section>
-
-        <section className="editor-stage surface">
-          <div className="editor-header">
             <div>
-              <p className="section-label">Live editor</p>
-              <h2>Monaco-powered review session</h2>
+              <p className="metric-label">Total reviews</p>
+              <strong>{totalReviews}</strong>
+              <span>{latestReview ? `Latest: ${latestReview.title}` : 'Run a review to populate history.'}</span>
             </div>
-            <button className="ghost-button compact" type="button" onClick={() => setPanelOpen((open) => !open)}>
-              <PanelRight size={14} />
-              {panelOpen ? 'Hide AI panel' : 'Show AI panel'}
-            </button>
+          </article>
+
+          <article className="surface metric-card highlight">
+            <div className="metric-icon">
+              <ChartColumnBig size={18} />
+            </div>
+            <div>
+              <p className="metric-label">Average AI score</p>
+              <strong>{averageScore}/10</strong>
+              <span>Calculated in real time from Redux review storage.</span>
+            </div>
+          </article>
+
+          <article className="surface metric-card highlight">
+            <div className="metric-icon">
+              <ShieldCheck size={18} />
+            </div>
+            <div>
+              <p className="metric-label">Account signal</p>
+              <strong>{auth.user?.email ?? 'guest@codelens.dev'}</strong>
+              <span>{auth.status === 'authenticated' ? 'Synced with backend identity.' : 'Sign in to persist tokens.'}</span>
+            </div>
+          </article>
+        </section>
+        {isGuest ? <div className="blur-guard-overlay">{blurMessage}</div> : null}
+      </div>
+
+      <div className={`blur-guard ${isGuest ? 'is-locked' : ''}`}>
+        <section className="surface home-story">
+          <div className="response-panel-header">
+            <div>
+              <p className="section-label">Platform overview</p>
+              <h2>Designed to make AI reviews legible and traceable.</h2>
+            </div>
           </div>
 
-          <div className={`editor-layout ${panelOpen ? 'panel-open' : 'panel-closed'}`}>
-            <div className="editor-frame">
-              <div className="editor-toolbar">
-                <div className="traffic-lights" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-                <span className="editor-tab">frontend/src/pages/HomePage.tsx</span>
-                <span className="editor-badge">Autofix preview</span>
+          <div className="home-story-grid">
+            <article className="ai-callout">
+              <div className="callout-icon">
+                <Bot size={18} />
               </div>
-
-              <div className="editor-wrapper">
-                <Editor
-                  height="100%"
-                  defaultLanguage="typescript"
-                  value={editorSnippet}
-                  theme={editorTheme}
-                  options={{
-                    fontSize: 14,
-                    minimap: { enabled: false },
-                    padding: { top: 18, bottom: 18 },
-                    roundedSelection: true,
-                    scrollBeyondLastLine: false,
-                    wordWrap: 'on',
-                    lineNumbersMinChars: 3,
-                    fontFamily: "'SFMono-Regular', 'SF Mono', 'Fira Code', monospace",
-                    readOnly: true,
-                  }}
-                />
+              <div>
+                <strong>Review memory</strong>
+                <p>Each review stores title, source, score, AI suggestions, and corrected code for instant recall.</p>
               </div>
-            </div>
-
-            <aside className={`ai-panel glass-panel ${panelOpen ? 'is-visible' : 'is-hidden'}`}>
-              <div className="ai-panel-header">
-                <div>
-                  <p className="section-label">AI reviewer</p>
-                  <h3>Floating suggestion rail</h3>
-                </div>
-                <span className="confidence-pill">92% confidence</span>
+            </article>
+            <article className="ai-callout">
+              <div className="callout-icon">
+                <ShieldCheck size={18} />
               </div>
-
-              <article className="ai-callout">
-                <div className="callout-icon">
-                  <Bot size={18} />
-                </div>
-                <div>
-                  <strong>Ownership gap detected</strong>
-                  <p>Move side effects into a dedicated orchestration layer to keep the component render path deterministic.</p>
-                </div>
-              </article>
-
-              <div className="chip-row">
-                {suggestionChips.map((chip) => (
-                  <button className="chip" key={chip} type="button">
-                    {chip}
-                  </button>
-                ))}
+              <div>
+                <strong>Session guardrails</strong>
+                <p>Account status is always visible, so tokens and access stay aligned with your workspace.</p>
               </div>
-
-              <div className="timeline">
-                <div className="timeline-item">
-                  <span className="timeline-marker" />
-                  <div>
-                    <strong>Guard auth mutations</strong>
-                    <p>Check middleware ownership before dispatching optimistic updates.</p>
-                  </div>
-                </div>
-                <div className="timeline-item">
-                  <span className="timeline-marker" />
-                  <div>
-                    <strong>Reduce visual noise</strong>
-                    <p>Fade tertiary metadata until hover to preserve scan speed.</p>
-                  </div>
-                </div>
+            </article>
+            <article className="ai-callout">
+              <div className="callout-icon">
+                <ChartColumnBig size={18} />
               </div>
-
-              <button className="primary-button full-width" type="button">
-                Apply AI patch
-                <ChevronRight size={16} />
-              </button>
-            </aside>
+              <div>
+                <strong>Readable AI output</strong>
+                <p>Review detail renders as UI sections and Monaco panes, not as opaque JSON blobs.</p>
+              </div>
+            </article>
           </div>
         </section>
-      </main>
-    </div>
+        {isGuest ? <div className="blur-guard-overlay">{blurMessage}</div> : null}
+      </div>
+    </main>
   )
 }

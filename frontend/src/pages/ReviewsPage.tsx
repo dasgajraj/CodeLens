@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
 import { mapAxiosError, reviewApi } from '../lib/api'
-import { AuthTokens } from '../types/auth'
+import type { AuthTokens } from '../types/auth'
 import '../App.css'
 
 type ReviewsPageProps = {
