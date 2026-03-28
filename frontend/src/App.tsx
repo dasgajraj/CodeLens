@@ -97,16 +97,7 @@ function AppChrome() {
             <Activity size={14} />
             API {health}
           </span>
-          {user ? (
-            <NavLink to="/user" className="status-pill status-pill-link">
-              {user.email}
-            </NavLink>
-          ) : (
-            <NavLink to="/auth" className="status-pill status-pill-link">
-              guest@codelens.dev
-            </NavLink>
-          )}
-        </div>
+          </div>
       </header>
 
       <Routes>

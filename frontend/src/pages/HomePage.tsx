@@ -23,6 +23,8 @@ export function HomePage() {
     : 0
 
   const heroCtaHref = auth.status === 'authenticated' ? '/workspace' : '/auth'
+  const isGuest = auth.status !== 'authenticated'
+  const blurMessage = ''
 
   return (
     <main className="home-grid">
@@ -48,21 +50,24 @@ export function HomePage() {
             </Link>
           </div>
 
-          <div className="hero-metrics">
-            <article className="hero-pill">
-              <p className="metric-label">Latest summary</p>
-              <strong>{latestReview?.aiSuggestions?.summary ?? 'AI analysis waiting'}</strong>
-              <span>
-                {latestReview
-                  ? `${latestReview.language ?? 'Code'} review · ${latestReview.title}`
-                  : 'Generate a review to populate your feed.'}
-              </span>
-            </article>
-            <article className="hero-pill">
-              <p className="metric-label">Session state</p>
-              <strong>{auth.status === 'authenticated' ? 'Authenticated' : 'Guest'}</strong>
-              <span>{auth.user?.email ?? 'Sign in to sync history and tokens.'}</span>
-            </article>
+          <div className={`blur-guard ${isGuest ? 'is-locked' : ''}`}>
+            <div className="hero-metrics">
+              <article className="hero-pill">
+                <p className="metric-label">Latest summary</p>
+                <strong>{latestReview?.aiSuggestions?.summary ?? 'AI analysis waiting'}</strong>
+                <span>
+                  {latestReview
+                    ? `${latestReview.language ?? 'Code'} review · ${latestReview.title}`
+                    : 'Generate a review to populate your feed.'}
+                </span>
+              </article>
+              <article className="hero-pill">
+                <p className="metric-label">Session state</p>
+                <strong>{auth.status === 'authenticated' ? 'Authenticated' : 'Guest'}</strong>
+                <span>{auth.user?.email ?? 'Sign in to sync history and tokens.'}</span>
+              </article>
+            </div>
+            {isGuest ? <div className="blur-guard-overlay">{blurMessage}</div> : null}
           </div>
         </div>
 
@@ -101,79 +106,85 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="home-columns">
-        <article className="surface metric-card highlight">
-          <div className="metric-icon">
-            <FileCode2 size={18} />
-          </div>
-          <div>
-            <p className="metric-label">Total reviews</p>
-            <strong>{totalReviews}</strong>
-            <span>{latestReview ? `Latest: ${latestReview.title}` : 'Run a review to populate history.'}</span>
-          </div>
-        </article>
-
-        <article className="surface metric-card highlight">
-          <div className="metric-icon">
-            <ChartColumnBig size={18} />
-          </div>
-          <div>
-            <p className="metric-label">Average AI score</p>
-            <strong>{averageScore}/10</strong>
-            <span>Calculated in real time from Redux review storage.</span>
-          </div>
-        </article>
-
-        <article className="surface metric-card highlight">
-          <div className="metric-icon">
-            <ShieldCheck size={18} />
-          </div>
-          <div>
-            <p className="metric-label">Account signal</p>
-            <strong>{auth.user?.email ?? 'guest@codelens.dev'}</strong>
-            <span>{auth.status === 'authenticated' ? 'Synced with backend identity.' : 'Sign in to persist tokens.'}</span>
-          </div>
-        </article>
-      </section>
-
-      <section className="surface home-story">
-        <div className="response-panel-header">
-          <div>
-            <p className="section-label">Platform overview</p>
-            <h2>Designed to make AI reviews legible and traceable.</h2>
-          </div>
-        </div>
-
-        <div className="home-story-grid">
-          <article className="ai-callout">
-            <div className="callout-icon">
-              <Bot size={18} />
+      <div className={`blur-guard ${isGuest ? 'is-locked' : ''}`}>
+        <section className="home-columns">
+          <article className="surface metric-card highlight">
+            <div className="metric-icon">
+              <FileCode2 size={18} />
             </div>
             <div>
-              <strong>Review memory</strong>
-              <p>Each review stores title, source, score, AI suggestions, and corrected code for instant recall.</p>
+              <p className="metric-label">Total reviews</p>
+              <strong>{totalReviews}</strong>
+              <span>{latestReview ? `Latest: ${latestReview.title}` : 'Run a review to populate history.'}</span>
             </div>
           </article>
-          <article className="ai-callout">
-            <div className="callout-icon">
-              <ShieldCheck size={18} />
-            </div>
-            <div>
-              <strong>Session guardrails</strong>
-              <p>Account status is always visible, so tokens and access stay aligned with your workspace.</p>
-            </div>
-          </article>
-          <article className="ai-callout">
-            <div className="callout-icon">
+
+          <article className="surface metric-card highlight">
+            <div className="metric-icon">
               <ChartColumnBig size={18} />
             </div>
             <div>
-              <strong>Readable AI output</strong>
-              <p>Review detail renders as UI sections and Monaco panes, not as opaque JSON blobs.</p>
+              <p className="metric-label">Average AI score</p>
+              <strong>{averageScore}/10</strong>
+              <span>Calculated in real time from Redux review storage.</span>
             </div>
           </article>
-        </div>
-      </section>
+
+          <article className="surface metric-card highlight">
+            <div className="metric-icon">
+              <ShieldCheck size={18} />
+            </div>
+            <div>
+              <p className="metric-label">Account signal</p>
+              <strong>{auth.user?.email ?? 'guest@codelens.dev'}</strong>
+              <span>{auth.status === 'authenticated' ? 'Synced with backend identity.' : 'Sign in to persist tokens.'}</span>
+            </div>
+          </article>
+        </section>
+        {isGuest ? <div className="blur-guard-overlay">{blurMessage}</div> : null}
+      </div>
+
+      <div className={`blur-guard ${isGuest ? 'is-locked' : ''}`}>
+        <section className="surface home-story">
+          <div className="response-panel-header">
+            <div>
+              <p className="section-label">Platform overview</p>
+              <h2>Designed to make AI reviews legible and traceable.</h2>
+            </div>
+          </div>
+
+          <div className="home-story-grid">
+            <article className="ai-callout">
+              <div className="callout-icon">
+                <Bot size={18} />
+              </div>
+              <div>
+                <strong>Review memory</strong>
+                <p>Each review stores title, source, score, AI suggestions, and corrected code for instant recall.</p>
+              </div>
+            </article>
+            <article className="ai-callout">
+              <div className="callout-icon">
+                <ShieldCheck size={18} />
+              </div>
+              <div>
+                <strong>Session guardrails</strong>
+                <p>Account status is always visible, so tokens and access stay aligned with your workspace.</p>
+              </div>
+            </article>
+            <article className="ai-callout">
+              <div className="callout-icon">
+                <ChartColumnBig size={18} />
+              </div>
+              <div>
+                <strong>Readable AI output</strong>
+                <p>Review detail renders as UI sections and Monaco panes, not as opaque JSON blobs.</p>
+              </div>
+            </article>
+          </div>
+        </section>
+        {isGuest ? <div className="blur-guard-overlay">{blurMessage}</div> : null}
+      </div>
     </main>
   )
 }
