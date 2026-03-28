@@ -6,26 +6,25 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 // --- HELPER FUNCTIONS ---
 
 function detectLanguage(url, providedLanguage, headerLanguage) {
-    // If it's a manual paste with no URL, fallback to header or provided default
     if (!url) return (headerLanguage || providedLanguage || 'javascript').toLowerCase();
 
     const ext = url.split('.').pop().toLowerCase();
     const map = {
-        'js': 'javascript',
-        'jsx': 'javascript',
-        'ts': 'typescript',
-        'tsx': 'typescript',
-        'py': 'python',
-        'ipynb': 'python',
-        'cpp': 'cpp',
-        'c': 'c',
-        'java': 'java',
-        'html': 'html',
-        'css': 'css',
-        'rb': 'ruby',
-        'go': 'go'
+        js: 'javascript',
+        jsx: 'javascript',
+        ts: 'typescript',
+        tsx: 'typescript',
+        py: 'python',
+        ipynb: 'python',
+        cpp: 'cpp',
+        c: 'c',
+        java: 'java',
+        html: 'html',
+        css: 'css',
+        rb: 'ruby',
+        go: 'go',
     };
-    
+
     return (headerLanguage || map[ext] || providedLanguage || 'javascript').toLowerCase();
 }
 
@@ -37,8 +36,13 @@ function normalizeCodeText(value) {
 
 function safeJsonParse(rawText) {
     try {
-        return JSON.parse(rawText);
-    } catch (error) {
+        // Strip markdown fences if model wraps in ```json ... ```
+        const cleaned = rawText
+            .replace(/^```(?:json)?\s*/i, '')
+            .replace(/```\s*$/i, '')
+            .trim();
+        return JSON.parse(cleaned);
+    } catch {
         return null;
     }
 }
@@ -55,17 +59,13 @@ function formatWithPrettier(code, language) {
         css: 'css',
         scss: 'scss',
         html: 'html',
-        markdown: 'markdown'
+        markdown: 'markdown',
     };
 
     const parser = parserMap[(language || '').toLowerCase()] || 'babel';
 
     try {
-        return prettier.format(code, {
-            parser,
-            semi: true,
-            singleQuote: true
-        });
+        return prettier.format(code, { parser, semi: true, singleQuote: true });
     } catch (error) {
         console.warn('Prettier formatting failed:', error.message);
         return code;
@@ -82,7 +82,7 @@ function toReviewResponse(reviewDoc) {
         userId: reviewDoc.userId,
         status: reviewDoc.status,
         aiSuggestions: reviewDoc.aiSuggestions,
-        createdAt: reviewDoc.createdAt
+        createdAt: reviewDoc.createdAt,
     };
 }
 
@@ -91,25 +91,19 @@ function toRawGithubUrl(url) {
     if (url.includes('raw.githubusercontent.com')) return url;
     if (!url.includes('github.com')) return '';
 
-    return url
-        .replace('github.com', 'raw.githubusercontent.com')
-        .replace('/blob/', '/');
+    return url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
 }
 
 function buildContextSnippet(code) {
     const MAX_CONTEXT = 6000;
-    if (!code || typeof code !== 'string') {
-        return { snippet: '', truncated: false };
-    }
+    if (!code || typeof code !== 'string') return { snippet: '', truncated: false };
 
-    if (code.length <= MAX_CONTEXT) {
-        return { snippet: code, truncated: false };
-    }
+    if (code.length <= MAX_CONTEXT) return { snippet: code, truncated: false };
 
     const head = code.slice(0, 3500);
     const tail = code.slice(-1500);
     const removedChars = code.length - (head.length + tail.length);
-    const snippet = `${head}\n/* ... ${removedChars} chars truncated for AI token control ... */\n${tail}`;
+    const snippet = `${head}\n/* ... ${removedChars} chars truncated ... */\n${tail}`;
 
     return { snippet, truncated: true };
 }
@@ -124,73 +118,106 @@ async function generateGroqReview(language, code) {
             criticalBugs: [],
             optimizations: ['Set GROQ_API_KEY in backend/.env'],
             score: 0,
-            correctedCode: formatWithPrettier(code, language)
+            correctedCode: formatWithPrettier(code, language),
         };
     }
 
     const { snippet: inputCode, truncated } = buildContextSnippet(code);
     const contextNote = truncated
-        ? 'Code truncated for length; highlight any assumptions where context may be missing.'
+        ? 'Note: Code was truncated. Make assumptions where context is missing.'
         : 'Full code provided.';
 
-    const prompt = [
-        'Return only JSON with keys summary,criticalBugs,optimizations,score,correctedCode.',
-        'Rules: summary max 20 words; max 3 bugs; max 3 optimizations; score 0-10 integer.',
-        'correctedCode must be runnable, fully indented like a Prettier output, and include concise inline comments describing the adjustments.',
-        'Add missing braces, semicolons, or spacing so the output reads like production-ready code.',
-        'Ensure correctedCode applies real fixes (no copy of the original), uses valid language keywords, guards against null/empty inputs when relevant, and removes off-by-one errors.',
-        'Never repeat the original code verbatim; rewrite the snippet with the necessary fixes applied.',
-        'Whenever keywords are misspelled (e.g., fundtiom, functn, cst, cont, conle.log), fix them using proper JavaScript syntax before addressing logic.',
-        'If the input contains structural bugs (loops using <= length, missing returns, missing type checks), rewrite the function with safe, modern patterns even if it means replacing the entire snippet.',
-        'Only respond once you have produced correctedCode that differs from the original source; if needed, restate the entire function in a clean, linted form.',
-        contextNote,
+    // --- STRONG SYSTEM PROMPT ---
+    const systemPrompt = [
+        'You are a senior software engineer and code corrector.',
+        'Your ONLY job is to return a valid JSON object. No explanation, no markdown fences, no extra text.',
+        'The JSON must have exactly these keys: summary, criticalBugs, optimizations, score, correctedCode.',
+        '',
+        'STRICT RULES for correctedCode:',
+        '  1. You MUST rewrite the code from scratch — even if you think it is correct.',
+        '  2. Fix ALL syntax errors: misspelled keywords (funcn→function, cst→const, conle→console), missing braces, missing semicolons.',
+        '  3. Fix ALL logic errors: off-by-one loops (i<=length → i<length), shadowed variables, missing early returns.',
+        '  4. Add guard clauses for null/empty inputs.',
+        '  5. The correctedCode MUST be different from the input. Never return the original.',
+        '  6. Format the correctedCode as clean, production-ready, properly indented code.',
+        '  7. Add short inline comments explaining each fix.',
+        '',
+        'STRICT RULES for other fields:',
+        '  - summary: max 25 words describing what was wrong and what was fixed.',
+        '  - criticalBugs: array of up to 3 strings describing bugs found.',
+        '  - optimizations: array of up to 3 strings with improvement suggestions.',
+        '  - score: integer 0-10 rating the ORIGINAL code quality (0=broken, 10=perfect).',
+    ].join('\n');
+
+    // --- USER PROMPT ---
+    const userPrompt = [
         `Language: ${language}`,
-        'Code:',
-        inputCode
+        contextNote,
+        '',
+        'INPUT CODE (may contain bugs, typos, syntax errors — FIX ALL OF THEM):',
+        '```',
+        inputCode,
+        '```',
+        '',
+        'Return ONLY the JSON object. The correctedCode value must be a complete, fixed rewrite of the above.',
     ].join('\n');
 
     try {
         const response = await axios.post(
             GROQ_URL,
             {
-                model: 'llama-3.1-8b-instant',
-                temperature: 0.2,
-                max_tokens: 1000, // Increased for correctedCode buffer
+                model: 'llama-3.3-70b-versatile', // Upgraded: much stronger at code correction
+                temperature: 0.1,                 // Low temp = deterministic, accurate fixes
+                max_tokens: 2048,                 // Enough room for full correctedCode
                 response_format: { type: 'json_object' },
                 messages: [
-                    { role: 'system', content: 'You are a senior software engineer providing structured JSON reviews.' },
-                    { role: 'user', content: prompt }
-                ]
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt },
+                ],
             },
             {
                 headers: {
                     Authorization: `Bearer ${groqKey}`,
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
                 },
-                timeout: 25000
+                timeout: 30000,
             }
         );
 
         const raw = response.data?.choices?.[0]?.message?.content || '{}';
+        console.log('DEBUG RAW AI RESPONSE:', raw); // Remove after testing
         const parsed = safeJsonParse(raw) || {};
 
-        const correctedCandidate = typeof parsed.correctedCode === 'string' && parsed.correctedCode.trim()
-            ? parsed.correctedCode
-            : code;
+        // --- VALIDATE correctedCode is actually different from input ---
+        const rawCorrected = typeof parsed.correctedCode === 'string' ? parsed.correctedCode.trim() : '';
+        const isSameAsInput = rawCorrected === code.trim() || rawCorrected === '';
+
+        if (isSameAsInput) {
+            // AI failed to rewrite — log and flag it clearly
+            console.warn('WARN: AI returned same code as input. Flagging in response.');
+        }
+
+        const finalCorrected = isSameAsInput
+            ? `// AI could not auto-correct this snippet. Manual review needed.\n${code}`
+            : rawCorrected;
+
         return {
             summary: String(parsed.summary || 'No summary provided.'),
             criticalBugs: Array.isArray(parsed.criticalBugs) ? parsed.criticalBugs : [],
             optimizations: Array.isArray(parsed.optimizations) ? parsed.optimizations : [],
-            score: Number.isFinite(Number(parsed.score)) ? Math.max(0, Math.min(10, Number(parsed.score))) : 0,
-            correctedCode: formatWithPrettier(correctedCandidate, language)
+            score: Number.isFinite(Number(parsed.score))
+                ? Math.max(0, Math.min(10, Number(parsed.score)))
+                : 0,
+            correctedCode: formatWithPrettier(finalCorrected, language),
         };
     } catch (error) {
+        console.error('Groq API error:', error?.response?.data || error.message);
         return {
             summary: 'AI Analysis failed.',
             criticalBugs: [],
-            optimizations: ['Check API quota or connection.'],
+            optimizations: ['Check API quota or network connection.'],
             score: 0,
-            correctedCode: formatWithPrettier(code, language)
+            correctedCode: formatWithPrettier(code, language),
         };
     }
 }
@@ -200,43 +227,38 @@ async function generateGroqReview(language, code) {
 exports.createReview = async (req, res, next) => {
     try {
         let title, url, code, language, bodyUserId;
-        const headerLanguage = req.headers['x-language'] ? String(req.headers['x-language']).toLowerCase() : '';
+        const headerLanguage = req.headers['x-language']
+            ? String(req.headers['x-language']).toLowerCase()
+            : '';
         const authenticatedUserId = req.user && req.user.id;
 
         if (!authenticatedUserId) {
             return res.status(401).json({ message: 'Missing authenticated user context' });
         }
 
-        // 1. Check if the input is Raw Text or JSON
         if (typeof req.body === 'string') {
-            // Option A: RAW TEXT (Pasted Code)
+            // RAW TEXT paste
             code = req.body;
             title = `Manual Paste - ${new Date().toLocaleTimeString()}`;
-            language = headerLanguage || "javascript"; // Default for text pastes unless header provided
+            language = headerLanguage || 'javascript';
         } else {
-            // Option B: JSON (GitHub or Structured Request)
+            // JSON body (GitHub URL or structured)
             ({ title, url, code, language, userId: bodyUserId } = req.body);
             if (bodyUserId && bodyUserId !== authenticatedUserId) {
                 return res.status(403).json({ message: 'userId in body does not match authenticated user' });
             }
-            
-            if (!language && headerLanguage) {
-                language = headerLanguage;
-            }
+            if (!language && headerLanguage) language = headerLanguage;
         }
 
-        // 2. Validation & Defaults
-        if (!title) title = "Untitled Review";
+        if (!title) title = 'Untitled Review';
 
         let finalCode = normalizeCodeText(code);
 
-        // 3. GitHub Logic (Triggered if 'url' exists in JSON body)
         if (url) {
             const rawUrl = toRawGithubUrl(url);
             if (!rawUrl) {
                 return res.status(400).json({ message: 'Only GitHub URLs are permitted.' });
             }
-
             const response = await axios.get(rawUrl, { timeout: 15000 });
             finalCode = normalizeCodeText(response.data);
         }
@@ -245,26 +267,23 @@ exports.createReview = async (req, res, next) => {
             return res.status(400).json({ message: 'No code content detected' });
         }
 
-        // 4. Intelligence & AI Review
         const effectiveLanguage = detectLanguage(url, language, headerLanguage);
         const aiSuggestionsObj = await generateGroqReview(effectiveLanguage, finalCode);
 
-        // 5. Save to MongoDB
         const newReview = new Review({
             title,
             code: finalCode,
             githubUrl: url || 'Manual Paste',
             language: effectiveLanguage,
             userId: authenticatedUserId,
-            aiSuggestions: aiSuggestionsObj
+            aiSuggestions: aiSuggestionsObj,
         });
 
         await newReview.save();
-        return res.status(201).json({ 
-            message: 'Review created successfully', 
-            review: toReviewResponse(newReview) 
+        return res.status(201).json({
+            message: 'Review created successfully',
+            review: toReviewResponse(newReview),
         });
-
     } catch (err) {
         console.error('DEBUG ERROR:', err);
         return next(err);
@@ -299,6 +318,7 @@ exports.getAllReviews = async (req, res, next) => {
         return next(err);
     }
 };
+
 exports.deleteReview = async (req, res, next) => {
     try {
         const userId = req.user && req.user.id;
@@ -307,8 +327,8 @@ exports.deleteReview = async (req, res, next) => {
         }
 
         const review = await Review.findOneAndDelete({ _id: req.params.id, userId });
-        if (!review) return res.status(404).json({ message: "Review not found" });
-        res.json({ message: "Review deleted successfully" });
+        if (!review) return res.status(404).json({ message: 'Review not found' });
+        res.json({ message: 'Review deleted successfully' });
     } catch (err) {
         return next(err);
     }
